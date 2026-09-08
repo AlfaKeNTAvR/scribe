@@ -1,6 +1,7 @@
 import argparse
 import json
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 
 from scribe import __version__
@@ -54,6 +55,32 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="add the new ULID to the session's pending decisions",
     )
+    for verb in ("ratify", "reject"):
+        verdict_parser = subparsers.add_parser(
+            verb,
+            help=f"record a human {verb} verdict on a decision (plan 3.8, 4.10)",
+        )
+        verdict_parser.add_argument("record", help="alias or ULID")
+        verdict_parser.add_argument(
+            "words",
+            nargs="*",
+            help="free-text note (the skills pass it after the alias)",
+        )
+        verdict_parser.add_argument(
+            "--by", help="who decided; default from git user.name"
+        )
+        verdict_parser.add_argument(
+            "--note", help="note stored on the attestation line"
+        )
+        verdict_parser.add_argument(
+            "--at", type=_utc_stamp, help="ISO 8601 UTC, YYYY-MM-DDTHH:MM:SSZ"
+        )
+        verdict_parser.add_argument(
+            "--via",
+            choices=("skill", "cli", "hand-written"),
+            default="cli",
+            help="path the verdict came through (default cli)",
+        )
     hook_parser = subparsers.add_parser(
         "hook",
         help="run a Claude Code hook handler with the JSON payload on stdin",
@@ -185,6 +212,39 @@ def _new_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _utc_stamp(value: str) -> str:
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected YYYY-MM-DDTHH:MM:SSZ") from exc
+    return value
+
+
+def _verdict_command(args: argparse.Namespace) -> int:
+    from scribe.ratify import apply_verdict, normalize_by
+
+    store = Store.discover()
+    if store is None or not store.path.is_dir():
+        print("no decision store found (docs/decisions)")
+        return 1
+    note = " ".join(part for part in (args.note, " ".join(args.words)) if part) or None
+    try:
+        outcome = apply_verdict(
+            store,
+            args.record,
+            args.command,
+            by=normalize_by(args.by, store.root),
+            note=note,
+            at=args.at,
+            via=args.via,
+        )
+    except OSError as exc:
+        print(f"scribe {args.command} failed: {exc}; re-run the same command to finish")
+        return 1
+    print(outcome.message)
+    return outcome.code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -196,6 +256,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _lookup_command(args)
     if args.command == "new":
         return _new_command(args)
+    if args.command in ("ratify", "reject"):
+        return _verdict_command(args)
     if args.command == "hook":
         from scribe.hooks.launcher import dispatch
 

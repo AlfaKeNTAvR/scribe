@@ -9,7 +9,6 @@ from typing import Any
 
 from .frontmatter import join, split
 
-
 MUTABLE_KEYS = {
     "review_state",
     "effective_state",
@@ -32,7 +31,7 @@ class Record:
     body: str
 
     @classmethod
-    def load(cls, path: str | Path) -> "Record":
+    def load(cls, path: str | Path) -> Record:
         record_path = Path(path)
         data, body = split(record_path.read_text(encoding="utf-8"))
         return cls(record_path, data, body)
@@ -53,12 +52,20 @@ class Record:
         new: Any,
         event: str,
         by: str,
+        *,
+        force: bool = False,
         **extra: Any,
     ) -> bool:
+        """Set `field` and append one history entry; `force` records an unchanged value too.
+
+        `force` serves the ratify and reject reversals (plan 3.8): the matrix
+        promises three history entries even when the same person reverses their
+        own verdict and `ratified_by` keeps its value.
+        """
         if field not in MUTABLE_KEYS - {"history"}:
             raise ValueError(f"immutable field: {field}")
         old = self.data.get(field)
-        if old == new:
+        if old == new and not force:
             return False
         self.data[field] = new
         entry = {
