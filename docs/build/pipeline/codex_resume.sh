@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Resume the most recent Codex thread for one more slice.
-# Usage: bash codex_resume.sh <step-tag> [message]
+# Usage: bash codex_resume.sh <step-tag> [message-or-file]
 set -u
 CODEX=/home/alfakentavr/.codex/packages/standalone/current/bin/codex
 OUT=/home/alfakentavr/.claude/jobs/f4c38b72/tmp/build
 TAG=${1:?step tag required}
 MSG=${2:-"Continue where you left off. Do not restart from scratch. If you were about to write the final message, write it now in full."}
+# A second argument naming a readable file is expanded to that file's content.
+if [ -f "$MSG" ]; then MSG=$(cat "$MSG"); fi
 N=$(find "$OUT" -maxdepth 1 -name "$TAG-resume-*.jsonl" | wc -l)
 N=$((N + 1))
 cd /home/alfakentavr/scribe || exit 1
