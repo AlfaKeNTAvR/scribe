@@ -1,0 +1,11 @@
+{
+  "session_id": "session_fixture_gate",
+  "prompt_id": "prompt_fixture_gate",
+  "cwd": ".",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "Set-Location .\\packages\\core; npm publish --access public",
+    "description": "Publish the core package"
+  }
+}

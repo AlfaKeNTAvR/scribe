@@ -1,0 +1,10 @@
+{
+  "session_id": "session_fixture_gate",
+  "prompt_id": "prompt_fixture_gate",
+  "cwd": ".",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "ExitPlanMode",
+  "tool_input": {
+    "plan": "1. Add package httpx as a runtime dependency.\n2. Replace urllib calls in the fetcher.\n3. Update the tests."
+  }
+}

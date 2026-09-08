@@ -11,10 +11,10 @@ No implementation tasks had been completed at the start of this session.
 | T4 | done | Opus 5 subagent. `scribe index`, `index --check` exit 0; INDEX.md shows Review queue (0), Active decisions (3); 12 tests. Main session re-ran the suite: 127 passed. |
 | T5 | done | Opus 5 subagent. `lookup <alias>` prints path, bootstrap 25bb0e7 and e7c2684; `lookup 25bb0e7` prints three aliases; `lookup nope` exits 1; 10 tests. |
 | T6 | done | Fable 5.1 subagent. plugin.json and hooks.json valid, `claude plugin validate .` passed, user-prompt-submit fixture records task_refs, malformed stdin exits 0 silently; 51 tests. |
-| T7 | todo | Not run. |
-| T8 | todo | Not run. |
+| T7 | done | Fable 5.1 subagent. Match fixture injects additionalContext with the expected alias, no-match and outside-repo print nothing, all exit 0; warm median 0.499 s, bytecode-cold 0.500 s; 17 tests. |
+| T8 | done | Opus 5 subagent. `scribe new --spec --register --session` creates a validating record with task_refs from state, slug-2 on repeat, supersedes flips predecessor; decide skill has CLAUDE_SESSION_ID and no disable-model-invocation; 14 tests. Template lives at src/scribe/templates/ (I19). |
 | T9 | todo | Not run. |
-| T10 | todo | Not run. |
+| T10 | done | Fable 5.1 subagent. Shadow logs gate_verdict deny and exits 0, enforce exits 2 with denylist message, ratified action record allows, force-with-lease allows, ExitPlanMode sets decision_worthy, TaskCompleted logs capture_missing; 90 tests. Main session re-ran the suite: 248 passed. |
 | T11 | todo | Not run. |
 | T12 | todo | Not run. |
 | T13 | todo | Not run. |

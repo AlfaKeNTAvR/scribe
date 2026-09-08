@@ -1,0 +1,11 @@
+{
+  "session_id": "session_fixture_gate",
+  "prompt_id": "prompt_fixture_gate",
+  "cwd": ".",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status --short",
+    "description": "Show the working tree status"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "session_id": "session_fixture_gate",
+  "cwd": ".",
+  "hook_event_name": "Stop",
+  "stop_hook_active": true,
+  "last_assistant_message": "Re-entered after the first Stop hook."
+}

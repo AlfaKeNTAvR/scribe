@@ -1,0 +1,7 @@
+{
+  "session_id": "session_fixture_gate",
+  "cwd": ".",
+  "hook_event_name": "TaskCompleted",
+  "task_id": "task_fixture_0001",
+  "task_subject": "Swap urllib for httpx in the fetcher"
+}
