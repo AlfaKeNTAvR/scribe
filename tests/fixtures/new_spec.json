@@ -1,0 +1,43 @@
+{
+  "title": "Scribe new takes a JSON spec file",
+  "decided_by": "agent-recommended",
+  "recommended_by": "claude-code",
+  "provenance": {
+    "authored_by": "agent-drafted",
+    "agent": "claude-code",
+    "model": "claude-fable-5-1",
+    "trigger": "user-prompt"
+  },
+  "affects": [{ "type": "path", "pattern": "src/scribe/newrecord.py" }],
+  "tags": ["cli", "record-format"],
+  "reversibility": "two-way-door",
+  "blast_radius": "component",
+  "regret_when": "Filling a spec by hand costs more than writing the record by hand.",
+  "review": "2026-12-08",
+  "y_statement": "In the context of an agent that must write a decision record before the first implementing edit, facing the choice between many command line flags and one structured file, I decided to take a single JSON spec file, to achieve one reviewable artifact per record, accepting that the agent has to write a temp file first.",
+  "question": "How does the decide skill hand a full decision record to the CLI?",
+  "criteria": "- Every body section can be filled without shell quoting.\n- The generated identity fields cannot be supplied by the caller.",
+  "constraints": "- The skill can only run scribe through Bash.\n- The record must validate before anything is written.",
+  "options": [
+    {
+      "option": "One JSON spec file passed with --spec",
+      "for": "No shell quoting; the whole record is one reviewable artifact",
+      "against": "Needs a temp file",
+      "evidence": "Plan section 4.9",
+      "chosen": true
+    },
+    {
+      "option": "One command line flag per field",
+      "for": "No temp file",
+      "against": "Multi-paragraph body sections do not survive shell quoting",
+      "evidence": "Plan section 3.4 body requirements",
+      "why_rejected": "The body sections are prose, not flags"
+    }
+  ],
+  "decision": "The CLI reads a JSON spec file named by --spec, generates the identity and lifecycle fields itself, renders the body from the record template, and writes nothing unless the whole record validates.",
+  "consequences": "- Positive: the same spec shape works from a skill, a test, or a human.\n- Negative: the caller writes a temp file first.\n- Measure: records rejected by the validator before writing.",
+  "evidence_quote": "scribe new --spec <file> [--by <name>] [--session <id>] [--register]",
+  "evidence_pointers": [
+    "docs/build/03-plan-v2.md section 4.9, the scribe new paragraph"
+  ]
+}

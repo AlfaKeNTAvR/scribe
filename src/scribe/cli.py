@@ -40,6 +40,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="reverse lookup between commits and decision records",
     )
     lookup_parser.add_argument("token", help="commit-ish, ULID or alias")
+    new_parser = subparsers.add_parser(
+        "new",
+        help="write a decision record from a JSON spec",
+    )
+    new_parser.add_argument("--spec", required=True, help="path to the JSON spec file")
+    new_parser.add_argument(
+        "--by", help="author recorded in the proposed history entry"
+    )
+    new_parser.add_argument("--session", help="Claude Code session id")
+    new_parser.add_argument(
+        "--register",
+        action="store_true",
+        help="add the new ULID to the session's pending decisions",
+    )
     hook_parser = subparsers.add_parser(
         "hook",
         help="run a Claude Code hook handler with the JSON payload on stdin",
@@ -143,6 +157,34 @@ def _lookup_command(args: argparse.Namespace) -> int:
     return status
 
 
+def _new_command(args: argparse.Namespace) -> int:
+    from scribe.newrecord import SpecError, create_record, load_spec
+
+    store = Store.discover()
+    if store is None or not store.path.is_dir():
+        print("no decision store found (docs/decisions)")
+        return 1
+    try:
+        spec = load_spec(args.spec)
+    except SpecError as exc:
+        print(f"{args.spec}: {exc}")
+        return 1
+    path, problems = create_record(
+        store,
+        spec,
+        by=args.by,
+        session=args.session,
+        register=args.register,
+    )
+    for problem in problems:
+        print(f"{problem.severity}: {problem.code}: {problem.message}")
+    if path is None:
+        print("no record written")
+        return 1
+    print(_display_path(store, path))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -152,6 +194,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _index_command(args)
     if args.command == "lookup":
         return _lookup_command(args)
+    if args.command == "new":
+        return _new_command(args)
     if args.command == "hook":
         from scribe.hooks.launcher import dispatch
 

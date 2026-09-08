@@ -1,0 +1,44 @@
+{
+  "title": "Scribe new reconciles supersession",
+  "decided_by": "agent",
+  "recommended_by": "claude-code",
+  "provenance": {
+    "authored_by": "agent",
+    "agent": "claude-code",
+    "model": "claude-fable-5-1",
+    "trigger": "self-initiated"
+  },
+  "affects": [{ "type": "path", "pattern": "src/scribe/store.py" }],
+  "tags": ["supersession"],
+  "reversibility": "two-way-door",
+  "blast_radius": "component",
+  "regret_when": "A predecessor is retired by an edge that a human never reviewed.",
+  "review": null,
+  "supersedes": "D-260908-unreviewed-may-supersede-ratified",
+  "y_statement": "In the context of a new record that replaces an older one, facing the choice between editing the predecessor by hand and deriving its state from the edge, I decided to call reconcile_supersession right after the write, to achieve a store whose effective states always follow the edges, accepting one extra pass over every record.",
+  "question": "Who marks the predecessor superseded when a new record supersedes it?",
+  "criteria": "- The predecessor is never edited by hand.\n- The change is visible in the predecessor's history.",
+  "constraints": "- Only effective edges retire a predecessor (plan section 3.8).\n- The indexer stays read only.",
+  "options": [
+    {
+      "option": "scribe new calls reconcile_supersession after writing",
+      "for": "One code path keeps every predecessor in step with its edges",
+      "against": "Rewrites a second file during what looks like a single write",
+      "evidence": "Plan section 3.8",
+      "chosen": true
+    },
+    {
+      "option": "The indexer repairs predecessor states while generating INDEX.md",
+      "for": "No extra call site",
+      "against": "The indexer would stop being read only",
+      "evidence": "Plan section 3.5 rule 2",
+      "why_rejected": "Generating a view must not mutate the store"
+    }
+  ],
+  "decision": "After writing a record whose supersedes is set, scribe new calls reconcile_supersession with by scribe-new and saves every record it changed, then regenerates INDEX.md.",
+  "consequences": "- Positive: the predecessor carries a superseded history entry naming who retired it.\n- Negative: one write turns into two.\n- Measure: records whose effective_state disagrees with the edges, reported by lint.",
+  "evidence_quote": "(no user turn; self-initiated)",
+  "evidence_pointers": [
+    "docs/build/03-plan-v2.md section 3.8, the reconcile_supersession paragraph"
+  ]
+}
