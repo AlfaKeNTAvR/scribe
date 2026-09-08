@@ -1,13 +1,14 @@
+import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
-
 from scribe.cli import main
-
+from scribe.config import write_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -76,3 +77,43 @@ def run_cli(capsys: pytest.CaptureFixture[str]) -> Callable[..., tuple[int, str,
         return code, captured.out, captured.err
 
     return run
+
+
+@pytest.fixture
+def run_hook() -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Run `python -m scribe hook <event>` with a JSON (or raw) payload on stdin."""
+
+    def run(
+        event: str,
+        payload: dict | str | bytes,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if isinstance(payload, bytes):
+            stdin_text = payload.decode("utf-8", errors="replace")
+        elif isinstance(payload, str):
+            stdin_text = payload
+        else:
+            stdin_text = json.dumps(payload)
+        return subprocess.run(
+            [sys.executable, "-m", "scribe", "hook", event],
+            input=stdin_text,
+            cwd=str(cwd),
+            env={**os.environ, **(env or {})},
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+
+    return run
+
+
+@pytest.fixture
+def set_config() -> Callable[..., Path]:
+    """Write switches such as SCRIBE_GATES="enforce" into <root>/.claude/scribe/config.json."""
+
+    def write(root: Path, **switches: str) -> Path:
+        return write_config(root, **switches)
+
+    return write

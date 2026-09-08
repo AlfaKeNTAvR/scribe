@@ -1,0 +1,88 @@
+{
+  "description": "scribe: advisory decision hooks and shadow-mode gates; every handler is `scribe hook <event>` run through uv",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "session-start"],
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "user-prompt-submit"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "pre-tool-use-edit"],
+            "timeout": 1
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "gate"],
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "gate"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "reconcile"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "reconcile"],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

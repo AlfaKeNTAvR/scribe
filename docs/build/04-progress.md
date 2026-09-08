@@ -8,9 +8,9 @@ No implementation tasks had been completed at the start of this session.
 | T1 | done | Committed by the main session: trailers in 25bb0e7 (3 Decision lines), skeleton in 2a16716; uv.lock present; `uv run pytest -q` 1 passed; `scribe --version` prints scribe 0.1.0 (/home/alfakentavr/scribe). |
 | T2 | done | `uv run pytest -q`: 15 passed. `validate docs/decisions`: 3 records, 0 errors, 0 warnings. Bad ULID and jsonpath fixtures exit 1 with required messages. Record files and attestations unchanged. |
 | T3 | done | Finished by the Codex subagent before the usage limit hit; main session verified: `uv run pytest -q` 54 passed, task tests 39 passed, matcher one-liner ok. Implementer from T4 on: Claude subagents (M5). |
-| T4 | todo | Not run. |
-| T5 | todo | Not run. |
-| T6 | todo | Not run. |
+| T4 | done | Opus 5 subagent. `scribe index`, `index --check` exit 0; INDEX.md shows Review queue (0), Active decisions (3); 12 tests. Main session re-ran the suite: 127 passed. |
+| T5 | done | Opus 5 subagent. `lookup <alias>` prints path, bootstrap 25bb0e7 and e7c2684; `lookup 25bb0e7` prints three aliases; `lookup nope` exits 1; 10 tests. |
+| T6 | done | Fable 5.1 subagent. plugin.json and hooks.json valid, `claude plugin validate .` passed, user-prompt-submit fixture records task_refs, malformed stdin exits 0 silently; 51 tests. |
 | T7 | todo | Not run. |
 | T8 | todo | Not run. |
 | T9 | todo | Not run. |

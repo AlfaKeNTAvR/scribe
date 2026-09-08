@@ -1,0 +1,7 @@
+{
+  "session_id": "session_fixture_0001",
+  "prompt_id": "prompt_fixture_0001",
+  "cwd": ".",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Please tidy the index generator and keep the review queue first."
+}

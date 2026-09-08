@@ -1,0 +1,7 @@
+{
+  "session_id": "session_fixture_0002",
+  "prompt_id": "prompt_fixture_0002",
+  "cwd": ".",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Work on LIN-123: the bug from #42 is the same as octo/scribe#7, see LIN-123 again."
+}
