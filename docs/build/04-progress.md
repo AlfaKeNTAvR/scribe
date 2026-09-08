@@ -5,9 +5,9 @@ No implementation tasks had been completed at the start of this session.
 
 | Task id | Status | Acceptance result |
 |---|---|---|
-| T1 | failed | BLOCKED: uv lock failed. Required packages unavailable offline; online DNS fails. Orchestrator pytest and version commands exit 1 during resolution; uv.lock absent; bootstrap Decision trailer count 0. Git metadata is read-only. |
-| T2 | todo | Not run. |
-| T3 | todo | Not run. |
+| T1 | done | Committed by the main session: trailers in 25bb0e7 (3 Decision lines), skeleton in 2a16716; uv.lock present; `uv run pytest -q` 1 passed; `scribe --version` prints scribe 0.1.0 (/home/alfakentavr/scribe). |
+| T2 | done | `uv run pytest -q`: 15 passed. `validate docs/decisions`: 3 records, 0 errors, 0 warnings. Bad ULID and jsonpath fixtures exit 1 with required messages. Record files and attestations unchanged. |
+| T3 | running | Subagent implementation in progress. |
 | T4 | todo | Not run. |
 | T5 | todo | Not run. |
 | T6 | todo | Not run. |
@@ -27,6 +27,7 @@ No implementation tasks had been completed at the start of this session.
 - Work in dependency order; each task requires subagent and orchestrator pytest runs and its acceptance checks before its commit.
 - Re-run acceptance once for completed tasks on resume, without reimplementing them.
 - Record bodies and build handoffs remain immutable.
+- T1 was rechecked on resume with `UV_CACHE_DIR=/tmp/scribe-uv-cache`: 1 test passed, version output matched, `uv.lock` exists, and bootstrap commit `25bb0e7` has 3 Decision trailers.
 - Existing bootstrap commit `3a5b1d2` has no Decision trailers. The plan-prescribed empty trailer commit failed with `fatal: Unable to create '/home/alfakentavr/scribe/.git/index.lock': Read-only file system`.
 - The active sandbox explicitly grants only read access to `.git`, and its approval policy is `never`. No permission escalation is available in this session. Resume with writable Git metadata to complete the required bootstrap and per-task commits.
 - I1 records the limited deviation: prepare T1 files and tests, leave T1 incomplete, and do not start T2 while the bootstrap commit is blocked.
@@ -41,3 +42,7 @@ No implementation tasks had been completed at the start of this session.
 - Review adjustments requested before acceptance: derive expected plugin root in the version test for portability, and isolate fixture Git repositories from user configuration.
 - Required next task is T1. Restore dependency availability and writable Git metadata, create the prescribed empty bootstrap trailer commit, generate `uv.lock` with uv, run the full T1 acceptance checks, then commit T1 using `git add -A` and the prescribed message format. Do not mark T1 done or begin T2 before those pass.
 - No task has been committed or marked done. No implementation report is due yet. The worktree intentionally retains the incomplete T1 scaffold for the resumed session.
+
+## Commit queue
+
+T2 | feat: Add record schema and validation | Records need machine-checkable structure before lifecycle tooling. Add ULIDs, front-matter IO, records, store lookup, validation, fixtures, and CLI support. | Decision: D-260908-verbatim-quote-is-the-evidence
