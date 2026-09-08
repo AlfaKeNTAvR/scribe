@@ -122,8 +122,10 @@ def reconcile_supersession(records: list[Record], by: str) -> list[Record]:
                     if item.get("event") == "superseded"
                     and item.get("field") == "effective_state"
                 ),
-                "proposed",
+                None,
             )
+            if prior not in {"proposed", "implemented"}:
+                continue
             record.apply_change("effective_state", prior, "restored", by)
             changed.append(record)
     return changed
