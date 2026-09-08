@@ -7,7 +7,7 @@ No implementation tasks had been completed at the start of this session.
 |---|---|---|
 | T1 | done | Committed by the main session: trailers in 25bb0e7 (3 Decision lines), skeleton in 2a16716; uv.lock present; `uv run pytest -q` 1 passed; `scribe --version` prints scribe 0.1.0 (/home/alfakentavr/scribe). |
 | T2 | done | `uv run pytest -q`: 15 passed. `validate docs/decisions`: 3 records, 0 errors, 0 warnings. Bad ULID and jsonpath fixtures exit 1 with required messages. Record files and attestations unchanged. |
-| T3 | running | Subagent implementation in progress. |
+| T3 | done | Finished by the Codex subagent before the usage limit hit; main session verified: `uv run pytest -q` 54 passed, task tests 39 passed, matcher one-liner ok. Implementer from T4 on: Claude subagents (M5). |
 | T4 | todo | Not run. |
 | T5 | todo | Not run. |
 | T6 | todo | Not run. |
@@ -44,5 +44,3 @@ No implementation tasks had been completed at the start of this session.
 - No task has been committed or marked done. No implementation report is due yet. The worktree intentionally retains the incomplete T1 scaffold for the resumed session.
 
 ## Commit queue
-
-T2 | feat: Add record schema and validation | Records need machine-checkable structure before lifecycle tooling. Add ULIDs, front-matter IO, records, store lookup, validation, fixtures, and CLI support. | Decision: D-260908-verbatim-quote-is-the-evidence
