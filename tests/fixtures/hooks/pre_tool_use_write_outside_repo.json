@@ -1,0 +1,11 @@
+{
+  "session_id": "session_fixture_0003",
+  "prompt_id": "prompt_fixture_0003",
+  "cwd": ".",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/tmp/scribe-outside-the-repo/notes.md",
+    "content": "outside\n"
+  }
+}
