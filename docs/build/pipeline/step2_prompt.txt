@@ -1,0 +1,19 @@
+You are the plan reviewer (step 2 of 5) for `scribe`, a Claude Code plugin that records agent decisions, links them to code, injects them before edits and queues them for human ratification. You run read-only. Your review will be answered point by point by another agent (step 3), then implemented by an orchestrator (step 4), so every finding must be numbered, specific and actionable.
+
+Read, in this order:
+1. /home/alfakentavr/.claude/.claude/worktrees/decision-scribing-glossary/research/decision-scribing/build-brief.md (scope, fixed decisions that must not be reopened, plugin facts verified against Claude Code docs).
+2. /home/alfakentavr/scribe/docs/build/01-plan.md (the plan under review).
+3. /home/alfakentavr/scribe/docs/decisions/*.md (three hand-written records that must match the plan's own format spec) and /home/alfakentavr/scribe/docs/build/01-records-grading.md if it exists.
+4. /home/alfakentavr/.claude/.claude/worktrees/decision-scribing-glossary/research/decision-scribing/README.md sections 10 to 16 (the design spec the plan must implement; 10.2 schema, 10.3 lifecycle, 10.4 hook table, 12 DEMM evidence categories, 15 phases).
+5. /home/alfakentavr/scribe/AUTONOMOUS_DECISIONS_09_08_2026.md (choices the planner made).
+
+Review for, in priority order:
+A. Spec conformance: every field in README 10.2, every hook row in 10.4 for phases 1 to 3, every lifecycle rule in 10.3 is either implemented by a task or explicitly deferred. List each gap.
+B. Internal consistency: the three records match the format spec; INDEX layout matches; task acceptance tests actually test the stated behaviour; dependencies between tasks are acyclic and ordered.
+C. Implementability by an isolated subagent: tasks with hidden assumptions, missing file names, ambiguous exit codes, or acceptance tests that cannot run without something not yet built.
+D. Claude Code hook mechanics: stdin JSON shape per event, exit code semantics (0 vs 2, stderr vs stdout, hookSpecificOutput additionalContext for PreToolUse), ${CLAUDE_PLUGIN_ROOT}, matcher syntax in hooks.json. Flag anything the plan marks UNVERIFIED and anything you believe is wrong, with your confidence. Do not invent facts; say "unverified" when you are not sure.
+E. Fail-open discipline: advisory hooks must never block on exception, timeouts under 1 s on the edit path, gate hooks propagate exit 2 only where the brief allows (phase 3 gates are scaffolded fail-open in this run).
+F. Windows best-effort: forward-slash paths, no bash in hooks, uv run availability, git hook shebangs.
+G. Anything a solo owner on Ubuntu would regret in a month (data loss, immutable body edits, id collisions, index drift).
+
+You are in a read-only sandbox, so you cannot write files. Output the complete review as your final message, starting with the line `# Plan review (step 2, Codex gpt-6-astra)` and nothing before it; the main session saves it to docs/build/02-plan-review.md verbatim. Format: a five-line verdict (ship / revise / redo, and why), then findings F1..Fn each with: severity (blocker / major / minor), the plan section or task id it refers to, what is wrong, what to change, confidence (high / medium / low). Then a short list of things the plan does well (max five lines) so the reviser knows what not to touch. Do not restate the plan. Plain hyphens only, no em dashes, no emojis.
