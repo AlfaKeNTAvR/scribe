@@ -70,3 +70,8 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 
 - Q5. Ratification is human-triggered by construction (skills the model cannot invoke, inline command, deny rule on the file) but not provable: an agent could still run `uv run scribe ratify` through Bash and the attestation would only show `via: cli`. Accept for now, or invest later in a stronger mechanism (a separate reviewer identity, signed attestations)? (R4)
 - Q6. `.claude-plugin/marketplace.json` needs `owner.email`; the plan uses `bognik3@gmail.com`. Keep, or use another address before the repository is ever published? (R15)
+
+## Step 4 implementer decisions
+
+- I1. Prepare and test the T1 skeleton while leaving T1 incomplete when the bootstrap trailer commit fails on the sandbox's read-only .git mount: preserve useful reviewable work, record the unmet commit requirement, and do not start dependent tasks until the commit is possible.
+- M3. Codex slice 1 was blocked by its sandbox: `.git` is read-only under workspace-write, and network is off so `uv lock` could not fetch pytest and PyYAML. Fix: the orchestrator no longer commits; it appends a commit queue to `docs/build/04-progress.md` and the main session commits between slices through /commit (this also restores the owner's "always /commit" rule, superseding the M1 exception). Network inside the sandbox is enabled with `-c sandbox_workspace_write.network_access=true`, scoped to these runs only, no global Codex config change. T1's bootstrap trailer commit is made by the main session as an empty commit because the records were already committed in 3a5b1d2 without trailers.

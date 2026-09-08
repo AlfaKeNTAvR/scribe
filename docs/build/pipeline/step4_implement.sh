@@ -9,6 +9,7 @@ mkdir -p "$OUT"
 cd /home/alfakentavr/scribe || exit 1
 timeout -k 30 1200 "$CODEX" exec -m gpt-6-astra --sandbox workspace-write -C /home/alfakentavr/scribe \
   -c 'model_reasoning_effort="high"' \
+  -c 'sandbox_workspace_write.network_access=true' \
   -c 'agents.default_subagent_model="gpt-5.6-sol"' \
   -c 'agents.default_subagent_reasoning_effort="medium"' \
   -c 'agents.max_concurrent_threads_per_session=3' \
