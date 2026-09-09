@@ -1,0 +1,212 @@
+"""T12: `scribe check --base <ref>`, the CI merge gate (plan 5.4, F11, F17)."""
+
+from __future__ import annotations
+
+import subprocess
+from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+from scribe.history_check import check_attestations_append_only
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+SPEC_PLAIN = FIXTURES / "new_spec.json"
+SPEC_SUPERSEDES = FIXTURES / "check_spec_supersedes.json"
+SUCCESSOR_SLUG = "merge-gate-blocks-unreviewed-successors"
+RATIFIED_A = "D-260908-unreviewed-may-supersede-ratified"
+
+RunCli = Callable[..., tuple[int, str, str]]
+
+
+# --- helpers -----------------------------------------------------------------
+
+
+def git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def commit_all(repo: Path, message: str) -> str:
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", message)
+    return git(repo, "rev-parse", "HEAD")
+
+
+def today_alias(slug: str) -> str:
+    stamp = datetime.now(timezone.utc).date().isoformat()[2:].replace("-", "")
+    return f"D-{stamp}-{slug}"
+
+
+def decisions(repo: Path) -> Path:
+    return repo / "docs" / "decisions"
+
+
+def write_source(repo: Path, relative: str, text: str) -> None:
+    target = repo / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+
+
+@pytest.fixture
+def ledger(tmp_repo: Path, run_cli: RunCli) -> Path:
+    """`main` carrying the three real records, their attestations and INDEX.md."""
+    git(tmp_repo, "checkout", "-q", "-b", "main")
+    assert run_cli(["index"], tmp_repo)[0] == 0
+    write_source(tmp_repo, "src/x.py", "value = 1\n")
+    commit_all(tmp_repo, "chore: Bootstrap the ledger")
+    return tmp_repo
+
+
+@pytest.fixture
+def successor_branch(ledger: Path, run_cli: RunCli) -> str:
+    """Branch `feat` adding unreviewed B superseding ratified A, index regenerated."""
+    git(ledger, "checkout", "-q", "-b", "feat")
+    code, _, _ = run_cli(["new", "--spec", str(SPEC_SUPERSEDES)], ledger)
+    assert code == 0
+    commit_all(ledger, "feat: Supersede the ratified decision")
+    return today_alias(SUCCESSOR_SLUG)
+
+
+def check(run_cli: RunCli, repo: Path, base: str = "main") -> tuple[int, str]:
+    code, stdout, _ = run_cli(["check", "--base", base], repo)
+    return code, stdout
+
+
+# --- the supersede gate (plan 5.4 rule 1) ------------------------------------
+
+
+def test_unreviewed_successor_of_a_ratified_record_fails(
+    run_cli: RunCli, ledger: Path, successor_branch: str
+) -> None:
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"{successor_branch} supersedes ratified {RATIFIED_A}" in stdout
+    assert "introduces or depends on it" in stdout
+
+
+def test_ratifying_the_successor_makes_the_check_pass(
+    run_cli: RunCli, ledger: Path, successor_branch: str
+) -> None:
+    """F17: the verdict, its attestation, the history and the index must be committed."""
+    base = git(ledger, "rev-parse", "main")
+    code, _, _ = run_cli(["ratify", successor_branch, "--by", "@tester"], ledger)
+    assert code == 0
+    commit_all(ledger, "chore: Ratify the successor")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert (code, stdout.strip()) == (0, "scribe check: ok")
+    assert check_attestations_append_only(base, ledger) == []
+
+
+def test_a_plain_unreviewed_record_passes(run_cli: RunCli, ledger: Path) -> None:
+    git(ledger, "checkout", "-q", "-b", "plain")
+    assert run_cli(["new", "--spec", str(SPEC_PLAIN)], ledger)[0] == 0
+    commit_all(ledger, "docs: Record an ordinary decision")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert (code, stdout.strip()) == (0, "scribe check: ok")
+
+
+def test_a_path_matching_affects_fails_when_the_successor_is_at_the_base(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """F11: B is already on `main`; the branch only edits a file B's affects match."""
+    assert run_cli(["new", "--spec", str(SPEC_SUPERSEDES)], ledger)[0] == 0
+    successor = today_alias(SUCCESSOR_SLUG)
+    commit_all(ledger, "feat: Supersede the ratified decision")
+    git(ledger, "checkout", "-q", "-b", "code-only")
+    write_source(ledger, "src/x.py", "value = 2\n")
+    commit_all(ledger, "feat: Follow the unreviewed decision")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"{successor} supersedes ratified {RATIFIED_A}" in stdout
+    assert git(ledger, "diff", "--name-only", "main...HEAD") == "src/x.py"
+
+
+def test_a_decision_trailer_in_the_range_fails(run_cli: RunCli, ledger: Path) -> None:
+    """The third arm of rule 1: the range claims the unreviewed successor by trailer."""
+    assert run_cli(["new", "--spec", str(SPEC_SUPERSEDES)], ledger)[0] == 0
+    successor = today_alias(SUCCESSOR_SLUG)
+    commit_all(ledger, "feat: Supersede the ratified decision")
+    git(ledger, "checkout", "-q", "-b", "trailered")
+    write_source(ledger, "notes.md", "outside every affects pattern\n")
+    commit_all(ledger, f"docs: Note the choice\n\nDecision: {successor}\n")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"{successor} supersedes ratified {RATIFIED_A}" in stdout
+
+
+# --- ledger integrity (plan 5.4 rules 4 and 5) -------------------------------
+
+
+def test_deleting_an_attestation_line_fails(run_cli: RunCli, ledger: Path) -> None:
+    git(ledger, "checkout", "-q", "-b", "tamper")
+    path = decisions(ledger) / "RATIFICATIONS.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    path.write_text("".join(lines[:-1]), encoding="utf-8")
+    commit_all(ledger, "chore: Drop an attestation")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert "attestations_not_append_only" in stdout
+    assert "RATIFICATIONS.jsonl is not append-only relative to the base" in stdout
+
+
+def test_rewriting_a_record_body_fails_with_immutable_changed(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    git(ledger, "checkout", "-q", "-b", "rewrite")
+    path = decisions(ledger) / f"{RATIFIED_A}.md"
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\n### Rewritten after the fact\n",
+        encoding="utf-8",
+    )
+    commit_all(ledger, "docs: Rewrite a record body")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert "immutable_changed" in stdout
+    assert "the record body changed since the base" in stdout
+
+
+def test_rewriting_history_fails_with_history_rewritten(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    from scribe.record import Record
+
+    git(ledger, "checkout", "-q", "-b", "history")
+    path = decisions(ledger) / f"{RATIFIED_A}.md"
+    record = Record.load(path)
+    record.data["history"] = record.data["history"][1:]
+    record.save()
+    commit_all(ledger, "docs: Drop a history entry")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert "history_rewritten" in stdout
+
+
+# --- argument handling -------------------------------------------------------
+
+
+def test_an_unknown_base_ref_exits_one(run_cli: RunCli, ledger: Path) -> None:
+    code, stdout = check(run_cli, ledger, base="no-such-ref")
+
+    assert code == 1
+    assert stdout.strip() == "unknown base ref: no-such-ref"

@@ -1,0 +1,44 @@
+{
+  "title": "Merge gate blocks unreviewed successors",
+  "decided_by": "agent",
+  "recommended_by": "claude-code",
+  "provenance": {
+    "authored_by": "agent",
+    "agent": "claude-code",
+    "model": "claude-fable-5-1",
+    "trigger": "self-initiated"
+  },
+  "affects": [{ "type": "path", "pattern": "src/**" }],
+  "tags": ["ci"],
+  "reversibility": "two-way-door",
+  "blast_radius": "component",
+  "regret_when": "A branch lands code that follows a decision nobody reviewed.",
+  "review": null,
+  "supersedes": "D-260908-unreviewed-may-supersede-ratified",
+  "y_statement": "In the context of a branch whose code already follows an unreviewed decision, facing the choice between trusting the author and blocking the merge, I decided to fail the CI check while the successor is unreviewed, to achieve a ratified ledger on the default branch, accepting that a reviewer has to run scribe ratify before the branch can land.",
+  "question": "What happens when a branch supersedes a ratified decision without review?",
+  "criteria": "- The branch cannot merge while the successor is unreviewed.\n- An ordinary unreviewed record still merges.",
+  "constraints": "- The check may only read git and the store (plan section 5.4).\n- Ratification must be committed for the check to see it.",
+  "options": [
+    {
+      "option": "Fail the check while the successor is unreviewed",
+      "for": "The default branch never carries an unreviewed override of a ratified decision",
+      "against": "The author has to wait for a human verdict",
+      "evidence": "Plan section 5.4 rule 1",
+      "chosen": true
+    },
+    {
+      "option": "Warn in the pull request and merge anyway",
+      "for": "Nobody is blocked",
+      "against": "The override lands unreviewed",
+      "evidence": "Plan section 1 goal 4",
+      "why_rejected": "A warning nobody reads is not a gate"
+    }
+  ],
+  "decision": "scribe check exits 1 when an unreviewed record supersedes a ratified one and the range introduces it, depends on a path it affects, or carries its Decision trailer.",
+  "consequences": "- Positive: an override of a ratified decision is reviewed before it lands.\n- Negative: the branch waits for a human.\n- Measure: branches blocked by the supersede gate.",
+  "evidence_quote": "(no user turn; test fixture)",
+  "evidence_pointers": [
+    "docs/build/03-plan-v2.md section 5.4, the supersede gate paragraph"
+  ]
+}
