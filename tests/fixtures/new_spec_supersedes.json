@@ -1,5 +1,6 @@
 {
   "title": "Scribe new reconciles supersession",
+  "slug": "record-supersession-after-write",
   "decided_by": "agent",
   "recommended_by": "claude-code",
   "provenance": {

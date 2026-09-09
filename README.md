@@ -80,6 +80,17 @@ immutable, and every change to a mutable field (`review_state`,
 history entry. Never edit `docs/decisions/RATIFICATIONS.jsonl` by hand either;
 see the ratification model below.
 
+`scribe new` requires a `slug` in the spec and builds the alias as
+`D-YYMMDD-<slug>`, verbatim, with no automatic `-2`/`-3` suffix on a
+collision: it refuses the spec instead and asks for a more specific slug.
+The slug is a 3 to 6 word, verdict-first summary of the decision (first word
+from the verb allowlist in `newrecord.SLUG_VERBS`), written by whoever fills
+the spec, not derived from the title, so the alias reads like
+`D-260908-defer-history-replay-check` rather than a 40-character cut of the
+title's opening words. This rule applies only to specs `scribe new` consumes;
+every alias written before this change stays exactly as it is, still valid
+against the unchanged `schema.ALIAS_RE`.
+
 `verify` entries (run by `scribe lint` only) support two engines: `grep`
 (`{pattern, paths}`, a regex checked against files selected by glob) and
 `pytest` (`{target}`, a pytest node id or path run with `uv run --frozen

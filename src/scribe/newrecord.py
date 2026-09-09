@@ -16,7 +16,6 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -38,16 +37,58 @@ from .store import Store, reconcile_supersession
 from .ulid import generate
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "record_template.md"
-SLUG_MAX_LENGTH = 40
-SLUG_FALLBACK = "decision"
 DEFAULT_BY = "scribe-new"
 UNKNOWN_SESSION = "unknown"
-# V8: exclusive-create keeps retrying numbered suffixes; this bounds the retry
-# so a pathological collision fails cleanly instead of looping forever.
-MAX_ALIAS_ATTEMPTS = 1000
+
+# Verdict-first `slug` field (docs/build/13-codex-alias-analysis.md, "Codex
+# strict"): the alias is written by the agent, not derived from the title, so
+# every alias reads like `defer-history-replay-check` instead of a 40-character
+# cut of the title's opening words. The first slug word must be one of these
+# verdict verbs.
+SLUG_VERBS = (
+    "use",
+    "keep",
+    "defer",
+    "skip",
+    "allow",
+    "reject",
+    "require",
+    "pin",
+    "read",
+    "write",
+    "validate",
+    "record",
+    "batch",
+    "deny",
+    "block",
+    "prefer",
+    "retire",
+    "expire",
+    "quote",
+    "inject",
+    "split",
+    "warn",
+    "fail",
+    "refuse",
+    "stop",
+    "run",
+    "treat",
+)
+# Rejected anywhere in the slug, not just as the first word: they carry no
+# ledger meaning and only eat into the 40-character budget.
+SLUG_FILLER_WORDS = frozenset({"the", "a", "an", "its", "and", "or", "of", "to", "in"})
+SLUG_MIN_WORDS = 3
+SLUG_MAX_WORDS = 6
+SLUG_MAX_CHARS = 40
+# `validate_slug` below checks shape and word count as two separate steps, so
+# each gets its own error message; together they are equivalent to one
+# regex, `^[a-z0-9]+(?:-[a-z0-9]+){2,5}$` (lowercase ASCII words joined by
+# single hyphens, 3 to 6 words, no leading, trailing or repeated hyphen).
+_SLUG_SHAPE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 SPEC_FRONT_MATTER_KEYS = (
     "title",
+    "slug",
     "task_refs",
     "decided_by",
     "recommended_by",
@@ -100,7 +141,9 @@ FRONT_MATTER_DEFAULTS: dict[str, Any] = {
 
 
 class SpecError(ValueError):
-    """The spec file is missing, unreadable, or not a JSON object."""
+    """The spec file is missing, unreadable, not a JSON object, or fails a
+    spec-only rule such as `slug` validation or an alias collision. In every
+    case nothing is written."""
 
 
 def load_spec(path: str | Path) -> dict[str, Any]:
@@ -120,72 +163,94 @@ def load_spec(path: str | Path) -> dict[str, Any]:
     return loaded
 
 
-def slugify(title: str) -> str:
-    """Lowercase ASCII words joined by single hyphens, trimmed to 40 characters."""
-    lowered = title.lower().encode("ascii", "ignore").decode("ascii")
-    collapsed = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", lowered)).strip("-")
-    trimmed = collapsed[:SLUG_MAX_LENGTH].strip("-")
-    return trimmed or SLUG_FALLBACK
+def validate_slug(slug: Any) -> str:
+    """Validate the spec's required, agent-written `slug`.
+
+    Raises `SpecError` naming the specific rule the slug breaks, so the
+    caller can report it and write nothing. This only validates the spec's
+    `slug` field; the stored `alias` (`D-YYMMDD-<slug>`) still validates
+    separately against the unchanged `schema.ALIAS_RE`.
+    """
+    if not isinstance(slug, str) or not slug.strip():
+        raise SpecError("spec is missing the required 'slug' key")
+    if len(slug) > SLUG_MAX_CHARS:
+        raise SpecError(
+            f"slug is {len(slug)} characters, at most {SLUG_MAX_CHARS} allowed: "
+            f"{slug!r}"
+        )
+    if not _SLUG_SHAPE_RE.fullmatch(slug):
+        raise SpecError(
+            "slug must be lowercase letters and digits joined by single "
+            f"hyphens, with no leading, trailing or repeated hyphen: {slug!r}"
+        )
+    words = slug.split("-")
+    if len(words) < SLUG_MIN_WORDS:
+        raise SpecError(
+            f"slug has {len(words)} word(s), at least {SLUG_MIN_WORDS} required: "
+            f"{slug!r}"
+        )
+    if len(words) > SLUG_MAX_WORDS:
+        raise SpecError(
+            f"slug has {len(words)} words, at most {SLUG_MAX_WORDS} allowed: {slug!r}"
+        )
+    if words[0] not in SLUG_VERBS:
+        raise SpecError(
+            f"slug must start with a verdict verb, not {words[0]!r} "
+            f"(allowed: {', '.join(SLUG_VERBS)})"
+        )
+    filler = [word for word in words if word in SLUG_FILLER_WORDS]
+    if filler:
+        raise SpecError(
+            f"slug must not contain filler word(s) {', '.join(filler)}: {slug!r}"
+        )
+    return slug
 
 
 def alias_stem(slug: str, today: str) -> str:
     return f"D-{today[2:].replace('-', '')}-{slug}"
 
 
-def _alias_candidates(stem: str) -> Iterator[str]:
-    """`stem`, then `stem-2`, `stem-3`, ... without bound; callers cap attempts."""
-    yield stem
-    suffix = 2
-    while True:
-        yield f"{stem}-{suffix}"
-        suffix += 1
-
-
 def unique_alias(store: Store, slug: str, today: str) -> str:
-    """`D-YYMMDD-<slug>`, with `-2`, `-3` appended while the file already exists.
+    """`D-YYMMDD-<slug>`, once no record already uses it.
 
-    Best-effort only: two callers can both see the same free alias here before
-    either writes. `_write_record_exclusive` is what actually reserves the
-    filename (V8), retrying this same sequence under `open(path, "x")`.
+    Best-effort only: two callers can both pass this check for the same
+    alias before either writes. `_write_record_exclusive` is what actually
+    reserves the filename (V8), raising the same `SpecError` at write time
+    when a race loses to another writer.
     """
     stem = alias_stem(slug, today)
-    for candidate in _alias_candidates(stem):
-        if not (store.path / f"{candidate}.md").exists():
-            return candidate
-    raise AssertionError("unreachable")  # pragma: no cover
+    if (store.path / f"{stem}.md").exists():
+        raise SpecError(
+            f"a record with alias {stem} already exists; choose a more specific slug"
+        )
+    return stem
 
 
 def _write_record_exclusive(
     store: Store, stem: str, data: dict[str, Any], body: str
-) -> tuple[Path, str] | None:
-    """Reserve a filename and write the record under exclusive create (V8).
+) -> Path:
+    """Reserve `stem`'s filename and write the record under exclusive create (V8).
 
-    Tries `stem`, then `stem-2`, `stem-3`, ... via `os.O_EXCL`, so two `scribe
-    new` runs racing on the same title can never overwrite one another: the
-    loser always advances to the next unused suffix rather than clobbering the
-    winner's file. `data["alias"]` is updated in place to match whichever
-    candidate is finally used. Returns None (nothing written) once
-    MAX_ALIAS_ATTEMPTS candidates are all taken.
+    `unique_alias` already checked this filename is free, but two `scribe
+    new` runs can race between that check and this write; `os.O_EXCL` makes
+    the loser raise instead of clobbering the winner's file. Raises the same
+    `SpecError` `unique_alias` raises on a plain collision: from the loser's
+    point of view a race is indistinguishable from one.
     """
     store.path.mkdir(parents=True, exist_ok=True)
-    for attempt, candidate in enumerate(_alias_candidates(stem)):
-        if attempt >= MAX_ALIAS_ATTEMPTS:
-            return None
-        data["alias"] = candidate
-        candidate_path = store.path / f"{candidate}.md"
-        try:
-            # 0o644: records are data, never executable. The umask still
-            # applies on top of this (e.g. a 0o077 umask yields 0o600), which
-            # is normal, expected behaviour, not a bug.
-            descriptor = os.open(
-                candidate_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
-            )
-        except FileExistsError:
-            continue
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(join(data, body))
-        return candidate_path, candidate
-    return None
+    path = store.path / f"{stem}.md"
+    try:
+        # 0o644: records are data, never executable. The umask still
+        # applies on top of this (e.g. a 0o077 umask yields 0o600), which
+        # is normal, expected behaviour, not a bug.
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError as exc:
+        raise SpecError(
+            f"a record with alias {stem} already exists; choose a more specific slug"
+        ) from exc
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(join(data, body))
+    return path
 
 
 def _blockquote(text: str) -> str:
@@ -305,6 +370,8 @@ def build_front_matter(
         "implementation_links": [],
     }
     values.update(generated)
+    # `slug` only shapes the alias; the final key filter below (KEYS has no
+    # "slug" entry) already drops it from the stored record.
     return {key: values[key] for key in KEYS if key != "history"}
 
 
@@ -348,6 +415,10 @@ def create_record(
 ) -> tuple[Path | None, list[Problem]]:
     """Write one record from the spec; on any validator error nothing is written.
 
+    Raises `SpecError` when the spec's `slug` fails validation or collides
+    with an existing alias; in both cases nothing is written, matching
+    `load_spec`'s own contract for a bad spec.
+
     V8: the whole mutating part runs under the shared ledger lock, records are
     reloaded right after it is acquired, and the file itself is reserved with
     exclusive create so a same-title race can never overwrite another writer.
@@ -355,8 +426,7 @@ def create_record(
     now = utc_now()
     today = datetime.now(timezone.utc).date().isoformat()
     title = str(spec.get("title", "")).strip()
-    slug = slugify(title)
-    stem = alias_stem(slug, today)
+    slug = validate_slug(spec.get("slug"))
 
     with locked(ledger_lock_path(store.root)) as acquired:
         if not acquired:
@@ -368,11 +438,11 @@ def create_record(
         store.records(refresh=True)
         session_task_refs, session_prompt_ids = _session_defaults(store.root, session)
 
-        alias = unique_alias(store, slug, today)
+        stem = unique_alias(store, slug, today)
         data = build_front_matter(
             spec,
             generate(),
-            alias,
+            stem,
             today,
             session,
             session_task_refs,
@@ -381,24 +451,13 @@ def create_record(
         author = by or data["provenance"].get("agent") or DEFAULT_BY
         data["history"] = [_history_entry(author, session, now)]
         body = render_body(spec, title)
-        path = store.path / f"{alias}.md"
+        path = store.path / f"{stem}.md"
 
         problems = validate_record(data, body, store=store, path=path)
         if any(problem.severity == "error" for problem in problems):
             return None, problems
 
-        written = _write_record_exclusive(store, stem, data, body)
-        if written is None:
-            return None, [
-                *problems,
-                Problem(
-                    "error",
-                    "alias_reservation_failed",
-                    f"could not reserve a unique filename for {stem} "
-                    f"after {MAX_ALIAS_ATTEMPTS} attempts",
-                ),
-            ]
-        path, _final_alias = written
+        path = _write_record_exclusive(store, stem, data, body)
 
         records = store.records(refresh=True)
         if data["supersedes"] is not None:

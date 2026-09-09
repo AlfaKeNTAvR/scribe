@@ -15,7 +15,7 @@ from scribe.history_check import check_attestations_append_only
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SPEC_PLAIN = FIXTURES / "new_spec.json"
 SPEC_SUPERSEDES = FIXTURES / "check_spec_supersedes.json"
-SUCCESSOR_SLUG = "merge-gate-blocks-unreviewed-successors"
+SUCCESSOR_SLUG = "block-unreviewed-successor-merge"
 RATIFIED_A = "D-260908-unreviewed-may-supersede-ratified"
 # No other seed record's relates_to points at this one, unlike RATIFIED_A
 # (see D-260908-one-way-door-defer-not-stop); deleting it does not also
@@ -492,10 +492,8 @@ def test_a_ratification_added_to_the_target_after_the_fork_is_honoured(
     changed-paths/commits range for "introduces or depends on it" still comes
     from the merge base, so `feat`'s own delta is what is being asked about.
     """
-    from scribe.newrecord import slugify
-
-    predecessor_title = json.loads(SPEC_PLAIN.read_text(encoding="utf-8"))["title"]
-    predecessor_alias = today_alias(slugify(predecessor_title))
+    predecessor_slug = json.loads(SPEC_PLAIN.read_text(encoding="utf-8"))["slug"]
+    predecessor_alias = today_alias(predecessor_slug)
     assert run_cli(["new", "--spec", str(SPEC_PLAIN)], ledger)[0] == 0
     commit_all(ledger, "docs: Record the predecessor, still unreviewed")
 

@@ -1,5 +1,6 @@
 {
   "title": "Scribe new takes a JSON spec file",
+  "slug": "require-json-spec-file",
   "decided_by": "agent-recommended",
   "recommended_by": "claude-code",
   "provenance": {

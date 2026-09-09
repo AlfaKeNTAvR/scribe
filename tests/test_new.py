@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 from scribe import newrecord as newrecord_module
-from scribe.newrecord import slugify
 from scribe.record import Record
 from scribe.schema import validate_record
 from scribe.state import ledger_lock_path, session_entry, state_path, update_state
@@ -18,7 +17,7 @@ from scribe.store import Store
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SPEC = FIXTURES / "new_spec.json"
 SPEC_SUPERSEDES = FIXTURES / "new_spec_supersedes.json"
-SPEC_SLUG = "scribe-new-takes-a-json-spec-file"
+SPEC_SLUG = "require-json-spec-file"
 PREDECESSOR = "D-260908-unreviewed-may-supersede-ratified"
 SKILL = Path(__file__).resolve().parents[1] / "skills" / "decide" / "SKILL.md"
 
@@ -55,12 +54,214 @@ def read_state(root: Path) -> dict:
     return json.loads(state_path(root).read_text(encoding="utf-8"))
 
 
-def test_slugify_lowercases_collapses_and_trims() -> None:
-    assert slugify("Scribe new takes a JSON spec file") == SPEC_SLUG
-    assert slugify("  Hello,   World!!  ") == "hello-world"
-    assert slugify("!!!") == "decision"
-    assert len(slugify("word " * 30)) <= 40
-    assert not slugify("word " * 30).endswith("-")
+def _spec_with_slug(tmp_path: Path, slug: str | None) -> Path:
+    """A copy of the plain spec fixture with `slug` set to `slug`, or removed
+    entirely when `slug` is None."""
+    spec = json.loads(SPEC.read_text(encoding="utf-8"))
+    if slug is None:
+        del spec["slug"]
+    else:
+        spec["slug"] = slug
+    spec_path = tmp_path / "slug_spec.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    return spec_path
+
+
+def record_files(root: Path) -> set[str]:
+    """Names of every record file. `tmp_repo` starts with the three seed
+    records, so a rejected spec must leave this set unchanged, not empty."""
+    return {path.name for path in (root / "docs" / "decisions").glob("D-*.md")}
+
+
+# --- `slug` validation (docs/build/13-codex-alias-analysis.md, "Codex strict") ----
+
+
+def test_new_requires_a_slug(run_cli: RunCli, tmp_repo: Path, tmp_path: Path) -> None:
+    """The old code has no `slug` concept at all: dropping the key from the
+    spec leaves it exactly as valid as before, so the old code writes a
+    record and exits 0. Fails on the old code on the `code == 1` assertion.
+    """
+    spec = _spec_with_slug(tmp_path, None)
+    before = record_files(tmp_repo)
+
+    code, stdout, _ = run_cli(["new", "--spec", str(spec), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "slug" in stdout
+    assert "no record written" in stdout
+    assert record_files(tmp_repo) == before
+
+
+def test_new_slug_needs_at_least_three_words(
+    run_cli: RunCli, tmp_repo: Path, tmp_path: Path
+) -> None:
+    """Old code treats `slug` as an unrecognized spec key and rejects the spec
+    with `unknown spec keys: slug`, not a word-count message. Fails on the
+    old code on the `"at least 3" in stdout` assertion.
+    """
+    spec = _spec_with_slug(tmp_path, "run-quick")
+    before = record_files(tmp_repo)
+
+    code, stdout, _ = run_cli(["new", "--spec", str(spec), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "at least 3" in stdout
+    assert "no record written" in stdout
+    assert record_files(tmp_repo) == before
+
+
+def test_new_slug_rejects_more_than_six_words(
+    run_cli: RunCli, tmp_repo: Path, tmp_path: Path
+) -> None:
+    """Old code rejects this spec too, but for the unrelated `unknown spec
+    keys: slug` reason. Fails on the old code on the `"at most 6" in stdout`
+    assertion.
+    """
+    spec = _spec_with_slug(tmp_path, "run-red-blue-green-black-white-gray")
+    before = record_files(tmp_repo)
+
+    code, stdout, _ = run_cli(["new", "--spec", str(spec), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "at most 6" in stdout
+    assert "no record written" in stdout
+    assert record_files(tmp_repo) == before
+
+
+def test_new_slug_rejects_more_than_forty_characters(
+    run_cli: RunCli, tmp_repo: Path, tmp_path: Path
+) -> None:
+    """Old code rejects this spec for the unrelated `unknown spec keys: slug`
+    reason. Fails on the old code on the `"at most 40" in stdout` assertion.
+    """
+    spec = _spec_with_slug(tmp_path, "validate-really-long-descriptive-slug-name")
+    assert len(json.loads(spec.read_text())["slug"]) > 40
+    before = record_files(tmp_repo)
+
+    code, stdout, _ = run_cli(["new", "--spec", str(spec), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "at most 40" in stdout
+    assert "no record written" in stdout
+    assert record_files(tmp_repo) == before
+
+
+def test_new_slug_rejects_bad_characters(
+    run_cli: RunCli, tmp_repo: Path, tmp_path: Path
+) -> None:
+    """Old code rejects this spec for the unrelated `unknown spec keys: slug`
+    reason. Fails on the old code on the `"repeated hyphen" in stdout`
+    assertion.
+    """
+    spec = _spec_with_slug(tmp_path, "require-json--spec-file")
+    before = record_files(tmp_repo)
+
+    code, stdout, _ = run_cli(["new", "--spec", str(spec), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "repeated hyphen" in stdout
+    assert "no record written" in stdout
+    assert record_files(tmp_repo) == before
+
+
+def test_new_slug_first_word_must_be_a_verdict_verb(
+    run_cli: RunCli, tmp_repo: Path, tmp_path: Path
+) -> None:
+    """Old code rejects this spec for the unrelated `unknown spec keys: slug`
+    reason. Fails on the old code on the `"verdict verb" in stdout`
+    assertion.
+    """
+    spec = _spec_with_slug(tmp_path, "topic-json-spec-file")
+    before = record_files(tmp_repo)
+
+    code, stdout, _ = run_cli(["new", "--spec", str(spec), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "verdict verb" in stdout
+    assert "no record written" in stdout
+    assert record_files(tmp_repo) == before
+
+
+def test_new_slug_rejects_filler_tokens_anywhere(
+    run_cli: RunCli, tmp_repo: Path, tmp_path: Path
+) -> None:
+    """Old code rejects this spec for the unrelated `unknown spec keys: slug`
+    reason. Fails on the old code on the `"filler word" in stdout` assertion.
+    """
+    spec = _spec_with_slug(tmp_path, "keep-the-json-spec")
+    before = record_files(tmp_repo)
+
+    code, stdout, _ = run_cli(["new", "--spec", str(spec), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "filler word" in stdout
+    assert "no record written" in stdout
+    assert record_files(tmp_repo) == before
+
+
+def test_new_slug_collision_refuses_with_a_more_specific_slug_message(
+    run_cli: RunCli, tmp_repo: Path
+) -> None:
+    """A record already claims today's alias for this slug. Old code has no
+    collision error at all: it silently appends `-2` and writes a second
+    record, exiting 0. Fails on the old code on the `code == 1` assertion.
+    """
+    alias = today_alias(SPEC_SLUG)
+    decisions = tmp_repo / "docs" / "decisions"
+    decisions.mkdir(parents=True, exist_ok=True)
+    (decisions / f"{alias}.md").write_text(
+        "written by another record\n", encoding="utf-8"
+    )
+
+    code, stdout, _ = run_cli(["new", "--spec", str(SPEC), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "already exists" in stdout
+    assert "more specific slug" in stdout
+    assert "no record written" in stdout
+    assert not (decisions / f"{alias}-2.md").exists()
+
+
+def test_new_alias_race_raises_the_same_collision_message(
+    run_cli: RunCli, tmp_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """V8: `unique_alias` is only a best-effort guess; two callers can both
+    see the same free alias. Simulate the race by pinning it to an alias
+    whose file another writer has already created between the check and the
+    write; exclusive create must notice the collision and raise the same
+    `SpecError`, not overwrite it.
+
+    Old code advances to `-2` on this same race instead of raising. Fails on
+    the old code on the `code == 1` assertion.
+    """
+    alias = today_alias(SPEC_SLUG)
+    decisions = tmp_repo / "docs" / "decisions"
+    decisions.mkdir(parents=True, exist_ok=True)
+    pre_existing = decisions / f"{alias}.md"
+    pre_existing.write_text("written by another racing writer\n", encoding="utf-8")
+    monkeypatch.setattr(
+        newrecord_module, "unique_alias", lambda store, slug, today: alias
+    )
+
+    code, stdout, _ = run_cli(["new", "--spec", str(SPEC), "--register"], tmp_repo)
+
+    assert code == 1
+    assert "already exists" in stdout
+    assert "more specific slug" in stdout
+    assert (
+        pre_existing.read_text(encoding="utf-8") == "written by another racing writer\n"
+    )
+    assert not (decisions / f"{alias}-2.md").exists()
+
+
+def test_new_slug_forms_the_alias(run_cli: RunCli, session_state: Path) -> None:
+    """Happy path: a valid slug becomes `D-YYMMDD-<slug>` verbatim, with no
+    suffix."""
+    code, stdout = run_new(run_cli, session_state, SPEC)
+    record = Record.load(session_state / stdout.strip())
+
+    assert code == 0
+    assert record.data["alias"] == today_alias(SPEC_SLUG)
 
 
 def test_new_writes_a_record_that_validates(
@@ -248,48 +449,6 @@ def test_new_registers_under_unknown_without_a_session(
 
     assert code == 0
     assert len(session["pending_decisions"]) == 1
-
-
-def test_new_twice_with_the_same_title_appends_a_suffix(
-    run_cli: RunCli, session_state: Path
-) -> None:
-    run_new(run_cli, session_state, SPEC)
-    code, stdout = run_new(run_cli, session_state, SPEC)
-    second = session_state / "docs" / "decisions" / f"{today_alias(SPEC_SLUG)}-2.md"
-
-    assert code == 0
-    assert second.exists()
-    assert Record.load(second).data["alias"] == f"{today_alias(SPEC_SLUG)}-2"
-    assert stdout.strip().endswith(f"{today_alias(SPEC_SLUG)}-2.md")
-
-
-def test_new_alias_race_with_a_pre_created_file_advances_to_the_next_suffix(
-    run_cli: RunCli, session_state: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """V8: `unique_alias` is only a best-effort guess; two callers can both see
-    the same free alias. Simulate the race by pinning it to an alias whose
-    file another writer has already created; exclusive create must notice the
-    collision at write time and advance to `-2` instead of overwriting it.
-    """
-    alias = today_alias(SPEC_SLUG)
-    decisions = session_state / "docs" / "decisions"
-    pre_existing = decisions / f"{alias}.md"
-    pre_existing.write_text("written by another racing writer\n", encoding="utf-8")
-    monkeypatch.setattr(
-        newrecord_module, "unique_alias", lambda store, slug, today: alias
-    )
-
-    code, stdout = run_new(run_cli, session_state, SPEC)
-    second = decisions / f"{alias}-2.md"
-
-    assert code == 0
-    assert stdout.strip().endswith(f"{alias}-2.md")
-    assert second.exists()
-    assert Record.load(second).data["alias"] == f"{alias}-2"
-    # the other writer's file was never touched
-    assert (
-        pre_existing.read_text(encoding="utf-8") == "written by another racing writer\n"
-    )
 
 
 def test_new_lock_timeout_exits_nonzero_without_writing(

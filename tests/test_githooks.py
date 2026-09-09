@@ -123,10 +123,19 @@ def pending_ids(repo: Path) -> list[str]:
     ]
 
 
-def new_pending(repo: Path, patterns: list[str], title: str) -> Record:
-    """A proposed, unreviewed record registered as pending for SESSION via `scribe new`."""
+def new_pending(
+    repo: Path, patterns: list[str], title: str, slug: str | None = None
+) -> Record:
+    """A proposed, unreviewed record registered as pending for SESSION via `scribe new`.
+
+    `slug` defaults to the fixture's own slug; pass a distinct one when a
+    test creates more than one record in the same repo on the same day, or
+    the two aliases collide.
+    """
     spec = load_spec(SPEC)
     spec["title"] = title
+    if slug is not None:
+        spec["slug"] = slug
     spec["affects"] = [{"type": "path", "pattern": pattern} for pattern in patterns]
     path, problems = create_record(
         Store(repo), spec, by="tester", session=SESSION, register=True
@@ -258,7 +267,12 @@ def test_pending_decisions_has_no_cap_and_all_survive_as_trailer_candidates(
 ) -> None:
     """V19: the old cap silently dropped ids past the 20th; there is no cap now."""
     records = [
-        new_pending(hooked_repo, [f"src/batch{i}.py"], f"Batch pending record {i}")
+        new_pending(
+            hooked_repo,
+            [f"src/batch{i}.py"],
+            f"Batch pending record {i}",
+            slug=f"batch-pending-record-{i}",
+        )
         for i in range(25)
     ]
     ulids = [record.data["id"] for record in records]
@@ -538,7 +552,12 @@ def test_amend_with_a_newly_pending_decision_adds_its_trailer_and_link(
     hooked_repo: Path,
 ) -> None:
     first, _, old_sha = record_then_implement(hooked_repo)
-    second = new_pending(hooked_repo, ["src/**"], "Second record after the fact")
+    second = new_pending(
+        hooked_repo,
+        ["src/**"],
+        "Second record after the fact",
+        slug="record-second-decision-after-amend",
+    )
 
     # A distinct committer date keeps the amended sha from colliding with the
     # original when both land in the same second with an unchanged tree.
@@ -574,9 +593,19 @@ def test_rebase_onto_end_to_end_leaves_both_records_linked_to_new_shas(
     per replayed commit here too), so this test does not pin down which of
     the two hooks did the writing -- see the more surgical test below for
     that half of the contract."""
-    first = new_pending(hooked_repo, ["src/a.py"], "First rebase record")
+    first = new_pending(
+        hooked_repo,
+        ["src/a.py"],
+        "First rebase record",
+        slug="record-first-rebase-item",
+    )
     commit(hooked_repo, "docs: Add the first record", "docs/decisions")
-    second = new_pending(hooked_repo, ["src/b.py"], "Second rebase record")
+    second = new_pending(
+        hooked_repo,
+        ["src/b.py"],
+        "Second rebase record",
+        slug="record-second-rebase-item",
+    )
     commit(hooked_repo, "docs: Add the second record", "docs/decisions")
     base = head(hooked_repo)
     branch = git(hooked_repo, "branch", "--show-current").stdout.strip()
@@ -638,9 +667,19 @@ def test_post_rewrite_after_rebase_relinks_both_records_and_drops_stale_shas(
     each replayed commit for real here, isolating exactly what `run_relink`
     (called through `post_rewrite.run`) does with a rewritten history -- the
     same contract the amend tests above exercise for a single commit."""
-    first = new_pending(hooked_repo, ["src/a.py"], "First rebase record")
+    first = new_pending(
+        hooked_repo,
+        ["src/a.py"],
+        "First rebase record",
+        slug="record-first-rebase-item",
+    )
     commit(hooked_repo, "docs: Add the first record", "docs/decisions")
-    second = new_pending(hooked_repo, ["src/b.py"], "Second rebase record")
+    second = new_pending(
+        hooked_repo,
+        ["src/b.py"],
+        "Second rebase record",
+        slug="record-second-rebase-item",
+    )
     commit(hooked_repo, "docs: Add the second record", "docs/decisions")
     base = head(hooked_repo)
     branch = git(hooked_repo, "branch", "--show-current").stdout.strip()

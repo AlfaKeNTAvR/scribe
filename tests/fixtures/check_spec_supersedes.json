@@ -1,5 +1,6 @@
 {
   "title": "Merge gate blocks unreviewed successors",
+  "slug": "block-unreviewed-successor-merge",
   "decided_by": "agent",
   "recommended_by": "claude-code",
   "provenance": {

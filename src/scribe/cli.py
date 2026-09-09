@@ -274,13 +274,18 @@ def _new_command(args: argparse.Namespace) -> int:
     except SpecError as exc:
         print(f"{args.spec}: {exc}")
         return 1
-    path, problems = create_record(
-        store,
-        spec,
-        by=args.by,
-        session=args.session,
-        register=args.register,
-    )
+    try:
+        path, problems = create_record(
+            store,
+            spec,
+            by=args.by,
+            session=args.session,
+            register=args.register,
+        )
+    except SpecError as exc:
+        print(f"{args.spec}: {exc}")
+        print("no record written")
+        return 1
     for problem in problems:
         print(f"{problem.severity}: {problem.code}: {problem.message}")
     if path is None:

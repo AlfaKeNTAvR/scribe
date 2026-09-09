@@ -22,7 +22,7 @@ SKILLS = [PROJECT_ROOT / "skills" / name / "SKILL.md" for name in ("ratify", "re
 
 # Real record A (ratified, affects src/scribe/index.py) and its future successor B.
 RATIFIED_A = "D-260908-unreviewed-may-supersede-ratified"
-SUCCESSOR_SLUG = "scribe-new-reconciles-supersession"
+SUCCESSOR_SLUG = "record-supersession-after-write"
 STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 VERDICT_FIELDS = ["review_state", "ratified_by", "ratified_at"]
 
