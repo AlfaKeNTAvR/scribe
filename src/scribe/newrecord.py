@@ -174,7 +174,12 @@ def _write_record_exclusive(
         data["alias"] = candidate
         candidate_path = store.path / f"{candidate}.md"
         try:
-            descriptor = os.open(candidate_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            # 0o644: records are data, never executable. The umask still
+            # applies on top of this (e.g. a 0o077 umask yields 0o600), which
+            # is normal, expected behaviour, not a bug.
+            descriptor = os.open(
+                candidate_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+            )
         except FileExistsError:
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:

@@ -1,7 +1,9 @@
 import fcntl
 import json
+import os
+import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -82,6 +84,62 @@ def test_new_writes_a_record_that_validates(
     assert record.data["ratified_by"] is None
     assert record.data["implementation_links"] == []
     assert record.data["title"] in record.body
+
+
+@pytest.fixture
+def fixed_umask() -> Iterator[int]:
+    """Force a known umask (0o002) for the duration of the test and restore it after.
+
+    0o002 (group-writable) is chosen deliberately: it is the umask value that
+    makes the platform default open mode 0o666 diverge from the 0o644 base
+    this fix uses (0o666 & ~0o002 == 0o664, but 0o644 & ~0o002 == 0o644), so
+    it is the value that exposes a mismatch between the two write paths.
+    """
+    previous = os.umask(0o002)
+    try:
+        yield 0o002
+    finally:
+        os.umask(previous)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix file mode bits")
+def test_new_writes_a_record_with_no_execute_bit(
+    run_cli: RunCli, session_state: Path, fixed_umask: int
+) -> None:
+    """V8's exclusive create (`os.open` with `O_CREAT`) must not fall back to
+    the default mode 0o777: that lands new records as 0o775 (executable)
+    instead of the 0o644 the three seed records use. Fails on the old code
+    on the `mode & 0o111 == 0` assertion, since the unmasked default mode
+    leaves the execute bits set.
+    """
+    run_new(run_cli, session_state, SPEC)
+    path = session_state / "docs" / "decisions" / f"{today_alias(SPEC_SLUG)}.md"
+
+    mode = path.stat().st_mode
+    assert mode & 0o111 == 0
+    assert mode & 0o777 == 0o644 & ~fixed_umask
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix file mode bits")
+def test_save_rewrite_keeps_the_record_at_0o644(
+    run_cli: RunCli, session_state: Path, fixed_umask: int
+) -> None:
+    """A record that is loaded and re-saved (as ratify and supersession
+    bookkeeping do) must land back at 0o644 minus umask, matching a fresh
+    `scribe new` record, not the platform default 0o666 that `Record.save`
+    used to create its temp file with. Under the 0o002 umask this fixture
+    forces, the old code's 0o666 base produces 0o664 where the new-record
+    path produces 0o644, so this fails on the old code on the final `mode ==
+    0o644 & ~fixed_umask` assertion (0o664 != 0o644).
+    """
+    run_new(run_cli, session_state, SPEC)
+    path = session_state / "docs" / "decisions" / f"{today_alias(SPEC_SLUG)}.md"
+
+    record = Record.load(path)
+    record.save()
+
+    mode = path.stat().st_mode & 0o777
+    assert mode == 0o644 & ~fixed_umask
 
 
 def test_new_inherits_task_refs_and_prompt_ids_from_state(

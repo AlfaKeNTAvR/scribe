@@ -37,9 +37,22 @@ class Record:
         return cls(record_path, data, body)
 
     def save(self) -> None:
+        """Write through a temp file and atomically replace it (crash-safe).
+
+        The temp file is created at 0o644 (umask still applies, same as
+        `_write_record_exclusive` in newrecord.py), not the platform default
+        of 0o666, so a fresh record and a rewritten one always land at the
+        same mode regardless of what the process umask happens to be. Since
+        every write recreates the file at 0o644, an existing record's mode
+        is normalized back to 0o644 rather than literally preserved bit for
+        bit; see docs/build/12-review-fix-f2.md for why that's the intended
+        behaviour here.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
-        temporary.write_text(join(self.data, self.body), encoding="utf-8", newline="\n")
+        descriptor = os.open(temporary, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o644)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(join(self.data, self.body))
         os.replace(temporary, self.path)
 
     def body_sha256(self) -> str:
