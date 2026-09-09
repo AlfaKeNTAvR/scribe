@@ -129,6 +129,8 @@ def _retired_state(record: Record, successor_alias: str) -> str | None:
     effective = record.data.get("effective_state")
     if effective == "expired":
         return "expired"
+    if effective == "backtracked":
+        return "backtracked"
     if effective == "superseded":
         return "superseded (stale)"
     return None

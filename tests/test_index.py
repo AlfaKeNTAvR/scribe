@@ -211,6 +211,52 @@ def test_retired_states_cover_edge_rejected_expired_and_stale(
     assert all("src/scribe" not in line for line in retired)
 
 
+def test_backtracked_record_appears_in_retired_not_vanished(tmp_path: Path) -> None:
+    """A ratified record whose effective_state is backtracked used to vanish:
+
+    it is not superseded, rejected, expired or superseded (stale), so
+    `_retired_state` returned None, and it is also not `proposed` or
+    `implemented`, so `Store.effective_authority` returned False. It landed
+    in neither Active nor Retired. Fails on the old code because `retired`
+    comes back empty instead of holding the one backtracked line.
+    """
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    write_fixture_record(
+        decisions,
+        "D-260905-backtracked",
+        date="2026-09-05",
+        review_state="ratified",
+        effective_state="backtracked",
+        decided_by="human",
+    )
+    store = Store(tmp_path)
+    record = store.records()[0]
+    (decisions / "RATIFICATIONS.jsonl").write_text(
+        json.dumps(
+            {
+                "id": record.data["id"],
+                "alias": record.data["alias"],
+                "verdict": "ratified",
+                "by": "@test",
+                "at": "2026-09-05T00:00:00Z",
+                "via": "cli",
+                "body_sha256": record.body_sha256(),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    store = Store(tmp_path)
+    text = render_index(store)
+    assert "## Active decisions (0)" in text
+    retired = section_lines(text, "## Retired")
+    assert retired == [
+        "D-260905-backtracked | backtracked | ratified | human | "
+        "Title of D-260905-backtracked."
+    ]
+
+
 def test_render_is_deterministic(fixture_store: Store) -> None:
     first = render_index(fixture_store)
     second = render_index(Store(fixture_store.root))
