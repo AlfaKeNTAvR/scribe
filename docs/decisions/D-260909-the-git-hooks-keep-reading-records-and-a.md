@@ -6,7 +6,7 @@ date: '2026-09-09'
 schema_version: 1
 task_refs: []
 review_state: unreviewed
-effective_state: proposed
+effective_state: implemented
 decided_by: agent-recommended
 recommended_by: claude-code
 ratified_by: null
@@ -23,7 +23,8 @@ affects:
 - {type: path, pattern: src/scribe/githooks/commit_msg.py}
 - {type: path, pattern: src/scribe/githooks/prepare_commit_msg.py}
 - {type: path, pattern: src/scribe/store.py}
-implementation_links: []
+implementation_links:
+- {commit: 81a856b77e92, paths: &id001 [src/scribe/githooks/commit_msg.py]}
 tags:
 - git-hooks
 - staging
@@ -39,6 +40,8 @@ supersedes: null
 relates_to: []
 history:
 - {at: '2026-09-09T20:27:58Z', event: proposed, by: claude-code, session: session_01A6tVoZuuWqu56QxEqtAjRw}
+- {at: '2026-09-09T21:26:49Z', event: link_added, by: scribe-post-commit, commit: 81a856b77e92, field: implementation_links, old: [], new: [{commit: 81a856b77e92, paths: *id001}]}
+- {at: '2026-09-09T21:26:49Z', event: implemented, by: scribe-post-commit, commit: 81a856b77e92, field: effective_state, old: proposed, new: implemented}
 ---
 
 # The git hooks keep reading records and attestations from the working tree, not from the staged index, until enforce mode ships or a false verdict is seen
