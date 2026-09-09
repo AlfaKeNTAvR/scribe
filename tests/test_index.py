@@ -9,6 +9,7 @@ from scribe.frontmatter import join
 from scribe.index import render_index
 from scribe.state import ledger_lock_path
 from scribe.store import Store
+from scribe.ulid import generate as generate_ulid
 
 
 def write_fixture_record(
@@ -24,8 +25,11 @@ def write_fixture_record(
     regret_when: str | None = None,
     review: str | None = None,
 ) -> Path:
+    # A real ULID, not the alias (V5): an attestation for this record carries
+    # this id, and `attestation_item_problems` now requires it to be
+    # ULID-shaped, matching how every real record is actually keyed.
     data = {
-        "id": alias,
+        "id": generate_ulid(),
         "alias": alias,
         "title": f"Title of {alias}",
         "date": date,

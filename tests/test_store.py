@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -270,8 +271,6 @@ FULL_ATTESTATION = {
 
 
 def _line(**overrides: object) -> str:
-    import json
-
     return json.dumps({**FULL_ATTESTATION, **overrides})
 
 
@@ -282,7 +281,10 @@ def test_attestation_line_problems_accepts_a_well_formed_ledger() -> None:
 
 def test_attestation_line_problems_reports_an_incomplete_line() -> None:
     """V5: a line missing actor, timestamp, alias or via is an error, not skipped."""
-    incomplete = '{"id": "01M21BV91NZSW1HMJ127KZAA5J", "verdict": "ratified", "body_sha256": "a"}\n'
+    incomplete = (
+        '{"id": "01M21BV91NZSW1HMJ127KZAA5J", "verdict": "ratified", '
+        f'"body_sha256": "{"a" * 64}"}}\n'
+    )
     problems = attestation_line_problems(incomplete)
     assert [p.code for p in problems] == ["attestation_incomplete"]
 
@@ -298,3 +300,93 @@ def test_attestation_line_problems_reports_a_truncated_tail() -> None:
     text = _line() + "\n" + _line(id="01M21BV91NZSW1HMJ127KZAA5K")
     problems = attestation_line_problems(text)
     assert [p.code for p in problems] == ["attestation_truncated_tail"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_substring"),
+    [
+        ("id", "not-a-ulid", "id must be a canonical ULID"),
+        ("alias", 123, "alias must be a string"),
+        ("verdict", "pending", "verdict must be one of"),
+        (
+            "body_sha256",
+            "a" * 63,
+            "body_sha256 must be a 64-character lowercase hex string",
+        ),
+        ("by", 123, "by must be a non-empty string"),
+        ("at", "yesterday", "at must be an ISO 8601 UTC datetime"),
+        ("via", ["cli"], "via must be one of"),
+        ("note", 42, "note must be a string or null"),
+    ],
+)
+def test_attestation_line_problems_reports_an_invalid_field(
+    field: str, value: object, expected_substring: str
+) -> None:
+    """V5: a truthy but wrong-typed or out-of-range field is an error, not a pass.
+
+    Fails on the old code: `attestation_line_problems` only checked
+    `not item.get(key)` truthiness, so `by: 123`, `at: "yesterday"` and
+    `via: ["cli"]` are all truthy and passed structural validation
+    unreported (`[p.code for p in problems] == []` on the old code, not the
+    `["attestation_invalid_field"]` asserted here). The old code also crashed
+    on `via: ["cli"]` if the membership check used `in` without an isinstance
+    guard first; this asserts a diagnostic, not an exception.
+    """
+    text = _line(**{field: value}) + "\n"
+    problems = attestation_line_problems(text)
+    assert [p.code for p in problems] == ["attestation_invalid_field"]
+    assert expected_substring in problems[0].message
+
+
+def test_attestation_line_problems_accepts_the_real_ledger() -> None:
+    """The live RATIFICATIONS.jsonl must still pass every new field check."""
+    ledger_path = (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "decisions"
+        / "RATIFICATIONS.jsonl"
+    )
+    text = ledger_path.read_text(encoding="utf-8")
+    assert attestation_line_problems(text) == []
+
+
+def test_effective_authority_requires_a_structurally_valid_latest_line(
+    tmp_path: Path,
+) -> None:
+    """V12: a malformed latest line must not grant authority.
+
+    The bare `{id, verdict, body_sha256}` line is the pre-V5 shape: its
+    `verdict` and `body_sha256` both match the record, which is all the old
+    code checked. Fails on the old code: `effective_authority` returns True
+    for the malformed line there, not False.
+    """
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    record = make_record(
+        decisions,
+        "D-260908-old",
+        "01M21BV91NZSW1HMJ127KZAA5J",
+        review_state="ratified",
+        effective_state="proposed",
+    )
+    store = Store(tmp_path)
+    store._records = [record]
+    ledger_path = decisions / "RATIFICATIONS.jsonl"
+
+    malformed = {
+        "id": record.data["id"],
+        "verdict": "ratified",
+        "body_sha256": record.body_sha256(),
+    }
+    ledger_path.write_text(json.dumps(malformed) + "\n", encoding="utf-8")
+    assert not store.effective_authority(record)
+
+    well_formed = {
+        **malformed,
+        "alias": record.data["alias"],
+        "by": "@tester",
+        "at": "2026-09-08T20:37:41Z",
+        "via": "cli",
+    }
+    ledger_path.write_text(json.dumps(well_formed) + "\n", encoding="utf-8")
+    assert store.effective_authority(record)

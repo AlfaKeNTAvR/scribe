@@ -61,6 +61,40 @@ def test_attestation_cross_checks(tmp_path: Path) -> None:
     }
 
 
+def test_attestation_with_a_wrong_typed_field_does_not_satisfy_ratified_state(
+    tmp_path: Path,
+) -> None:
+    """V5/V12: a matching verdict and body_sha256 are not enough on their own.
+
+    `by: 123` is truthy, and verdict/body_sha256 both match the record, so
+    the old code's shallow check treated this as a valid attestation and
+    `unattested_review_state` did not fire. Fails on the old code: that code
+    (not this fix) reports `codes()` without `unattested_review_state` here.
+    """
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    source = Record.load(FIXTURES / "ratified_without_attestation.md")
+    source.path = decisions / f"{source.data['alias']}.md"
+    source.save()
+    attestation = {
+        "id": source.data["id"],
+        "alias": source.data["alias"],
+        "verdict": "ratified",
+        "by": 123,
+        "at": "2026-09-08T20:37:43Z",
+        "body_sha256": source.body_sha256(),
+        "via": "cli",
+    }
+    (decisions / "RATIFICATIONS.jsonl").write_text(
+        json.dumps(attestation) + "\n", encoding="utf-8"
+    )
+    store = Store(tmp_path)
+    record = store.records()[0]
+    assert "unattested_review_state" in {
+        p.code for p in validate_record(record.data, record.body, store)
+    }
+
+
 def test_unreviewed_record_detects_existing_attestation(tmp_path: Path) -> None:
     decisions = tmp_path / "docs" / "decisions"
     decisions.mkdir(parents=True)

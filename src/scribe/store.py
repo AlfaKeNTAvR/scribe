@@ -7,10 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from .record import Record
-from .schema import Problem, unhashable_enum_reason
+from .schema import Problem, attestation_item_problems, unhashable_enum_reason
 from .state import log_hook_error
-
-REQUIRED_ATTESTATION_KEYS = ("id", "alias", "verdict", "by", "at", "via", "body_sha256")
 
 
 class Store:
@@ -125,10 +123,25 @@ class Store:
         return latest
 
     def effective_authority(self, record: Record) -> bool:
-        """Whether this live record is currently backed by its latest ratification."""
+        """Whether this live record is currently backed by its latest ratification.
+
+        The latest line itself must be structurally valid (V12): a malformed
+        or incomplete line (for example the original three-field
+        `{id, verdict, body_sha256}` shape) must not grant authority just
+        because its `verdict` and `body_sha256` happen to match, even though
+        `scribe check`'s attestation-integrity rule (V5) would already fail
+        such a ledger separately. `latest_attestation` itself still returns
+        the literal latest line unfiltered (V10's recovery path in `ratify`
+        needs to see it as-is); this is the one place that decides whether
+        that line is trustworthy enough to act as authority, and every other
+        authority consumer (the index's Active section, `commit_msg`'s
+        `active_records`, the Bash gate's `action_is_ratified`) goes through
+        this method rather than repeating the check.
+        """
         latest = self.latest_attestation(record.data.get("id"))
         if (
             latest is None
+            or attestation_item_problems(latest)
             or latest.get("verdict") != "ratified"
             or latest.get("body_sha256") != record.body_sha256()
             or record.data.get("review_state") != "ratified"
@@ -144,11 +157,14 @@ def attestation_line_problems(text: str) -> list[Problem]:
     """Structural problems in RATIFICATIONS.jsonl content (V5).
 
     `Store.latest_attestation` above skips a bad line so lookups stay best
-    effort; this function is the one that reports every malformed or
-    incomplete line, and a truncated final line, as an error instead of
+    effort; this function is the one that reports every malformed, incomplete
+    or invalid line, and a truncated final line, as an error instead of
     silently dropping it. `scribe check` runs it over the whole file and
     `ratify`/`reject` run it before appending, so a broken ledger is never
-    written past.
+    written past. Per-field type and value checks (a wrong type, an out of
+    range value, an id that isn't a ULID, ...) live in
+    `schema.attestation_item_problems`, shared with `Store.effective_authority`
+    so a line that fails here can never grant authority there (V12).
     """
     problems: list[Problem] = []
     if not text:
@@ -181,24 +197,8 @@ def attestation_line_problems(text: str) -> list[Problem]:
                 )
             )
             continue
-        if not isinstance(item, dict):
-            problems.append(
-                Problem(
-                    "error",
-                    "attestation_malformed",
-                    f"line {index + 1}: attestation line is not a JSON object",
-                )
-            )
-            continue
-        missing = [key for key in REQUIRED_ATTESTATION_KEYS if not item.get(key)]
-        if missing:
-            problems.append(
-                Problem(
-                    "error",
-                    "attestation_incomplete",
-                    f"line {index + 1}: missing {', '.join(missing)}",
-                )
-            )
+        for code, message in attestation_item_problems(item):
+            problems.append(Problem("error", code, f"line {index + 1}: {message}"))
     return problems
 
 

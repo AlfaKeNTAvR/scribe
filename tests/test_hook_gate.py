@@ -326,16 +326,34 @@ def test_unratified_or_two_way_door_action_record_does_not_allow(
 
 
 @pytest.mark.parametrize(
-    "change", ["unattested", "expired", "superseded", "body_hash_mismatch"]
+    "change",
+    ["unattested", "expired", "superseded", "body_hash_mismatch", "malformed"],
 )
 def test_action_authority_requires_live_matching_attestation(
     tmp_repo: Path, change: str
 ) -> None:
+    """V5/V12: `verdict` and `body_sha256` matching is not enough on its own.
+
+    `malformed` writes the pre-V5 three-field attestation shape
+    (`{id, verdict, body_sha256}`, no alias/by/at/via): both fields the old
+    code checked still match. Fails on the old code: `action_is_ratified`
+    returns True for `malformed` there, not False.
+    """
     write_ratified_action_record(tmp_repo, "git-push-force")
     path = tmp_repo / "docs" / "decisions" / "D-260908-allow-the-action.md"
     if change == "unattested":
         (tmp_repo / "docs" / "decisions" / "RATIFICATIONS.jsonl").write_text(
             "", encoding="utf-8"
+        )
+    elif change == "malformed":
+        record = Record.load(path)
+        malformed = {
+            "id": record.data["id"],
+            "verdict": "ratified",
+            "body_sha256": record.body_sha256(),
+        }
+        (tmp_repo / "docs" / "decisions" / "RATIFICATIONS.jsonl").write_text(
+            json.dumps(malformed) + "\n", encoding="utf-8"
         )
     else:
         record = Record.load(path)

@@ -288,6 +288,40 @@ def test_appending_a_contradictory_attestation_fails_an_unchanged_record(
     assert f"{RATIFIED_A}.md: unattested_review_state" in stdout
 
 
+def test_appending_an_attestation_with_a_wrong_typed_field_fails(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """V5: a wrong-typed field (here `by`) is reported, not silently accepted.
+
+    `by` is truthy (123, not empty or null) so the old truthiness-only check
+    passed this line; `scribe check` must still fail it. Fails on the old
+    code: `code == 1` and `attestation_invalid_field` do not hold there.
+    """
+    from scribe.record import Record
+
+    git(ledger, "checkout", "-q", "-b", "bad-field-type")
+    record = Record.load(decisions(ledger) / f"{RATIFIED_A}.md")
+    line = {
+        "id": record.data["id"],
+        "alias": RATIFIED_A,
+        "verdict": "ratified",
+        "by": 123,
+        "at": "2026-09-08T21:00:00Z",
+        "body_sha256": record.body_sha256(),
+        "via": "cli",
+    }
+    path = decisions(ledger) / "RATIFICATIONS.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line) + "\n")
+    commit_all(ledger, "chore: Append an attestation with a wrong-typed by field")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert "attestation_invalid_field" in stdout
+    assert "by must be a non-empty string" in stdout
+
+
 # --- record deletion (plan 5.4 rule 6, V6, supersedes I45) -------------------
 
 

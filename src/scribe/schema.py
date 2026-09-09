@@ -79,6 +79,10 @@ TAG_RE = re.compile(r"^[a-z0-9-]+$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 VERIFY_ID_RE = re.compile(r"^[a-z0-9-]+$")
+ATTESTATION_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+REQUIRED_ATTESTATION_KEYS = ("id", "alias", "verdict", "by", "at", "via", "body_sha256")
+ATTESTATION_VERDICTS = {"ratified", "rejected"}
+ATTESTATION_VIA_VALUES = {"skill", "cli", "hand-written"}
 HISTORY_EVENTS = {
     "proposed",
     "implemented",
@@ -313,9 +317,16 @@ def validate_record(
                 )
         if check_attestation:
             attestation = store.latest_attestation(record_id)
+            # A structurally invalid latest line (V5) counts as no attestation
+            # at all here (V12): it must not satisfy `unattested_review_state`
+            # just because its verdict and body_sha256 happen to match, and it
+            # must not drive `state_behind_attestation` off a malformed verdict.
+            attestation_valid = (
+                attestation is not None and not attestation_item_problems(attestation)
+            )
             if _in_str_set(review_state, {"ratified", "rejected"}):
                 if (
-                    not attestation
+                    not attestation_valid
                     or attestation.get("verdict") != review_state
                     or attestation.get("body_sha256") != _body_hash(body)
                 ):
@@ -323,7 +334,7 @@ def validate_record(
                         "unattested_review_state",
                         "review state has no matching current-body attestation",
                     )
-            elif review_state == "unreviewed" and attestation:
+            elif review_state == "unreviewed" and attestation_valid:
                 verdict = attestation.get("verdict", "ratify")
                 command = {"ratified": "ratify", "rejected": "reject"}.get(
                     verdict, verdict
@@ -375,6 +386,69 @@ def unhashable_enum_reason(mapping: dict[str, Any]) -> str | None:
 def _nullable_string(mapping: dict[str, Any], key: str, error: Any) -> None:
     if mapping.get(key) is not None and not _is_str(mapping.get(key)):
         error("invalid_type", f"{key} must be a string or null")
+
+
+def attestation_item_problems(item: Any) -> list[tuple[str, str]]:
+    """Structural (code, message) problems on one parsed attestation object (V5, V12).
+
+    Field-level checks reuse `_in_str_set` and friends, which return False
+    (not a crash) on an unhashable or wrong-typed value, so a line like
+    `{"id": ..., "by": 123, "at": "yesterday", "via": ["cli"]}` is reported
+    rather than raising.
+
+    `store.attestation_line_problems` calls this once per ledger line (V5,
+    every malformed or incomplete line is an error). `store.effective_authority`
+    and this module's own `unattested_review_state` / `state_behind_attestation`
+    checks below call it on the single latest line for a record, so a
+    structurally invalid line can never count as authority (V12) even when its
+    `verdict` and `body_sha256` happen to match. One function, so the ledger
+    report and every authority check share the same definition of "valid".
+    """
+    if not isinstance(item, dict):
+        return [("attestation_malformed", "attestation line is not a JSON object")]
+    problems: list[tuple[str, str]] = []
+
+    def error(code: str, message: str) -> None:
+        problems.append((code, message))
+
+    missing = [key for key in REQUIRED_ATTESTATION_KEYS if not item.get(key)]
+    if missing:
+        error("attestation_incomplete", f"missing {', '.join(missing)}")
+
+    if "id" not in missing and not is_valid(item.get("id")):
+        error("attestation_invalid_field", "id must be a canonical ULID")
+    if "alias" not in missing and not _is_str(item.get("alias")):
+        error("attestation_invalid_field", "alias must be a string")
+    if "verdict" not in missing and not _in_str_set(
+        item.get("verdict"), ATTESTATION_VERDICTS
+    ):
+        error(
+            "attestation_invalid_field",
+            f"verdict must be one of {', '.join(sorted(ATTESTATION_VERDICTS))}",
+        )
+    body_sha256 = item.get("body_sha256")
+    if "body_sha256" not in missing and not (
+        _is_str(body_sha256) and ATTESTATION_SHA256_RE.fullmatch(body_sha256)
+    ):
+        error(
+            "attestation_invalid_field",
+            "body_sha256 must be a 64-character lowercase hex string",
+        )
+    if "by" not in missing and not _is_str(item.get("by")):
+        error("attestation_invalid_field", "by must be a non-empty string")
+    if "at" not in missing and not _valid_datetime(item.get("at")):
+        error("attestation_invalid_field", "at must be an ISO 8601 UTC datetime")
+    if "via" not in missing and not _in_str_set(
+        item.get("via"), ATTESTATION_VIA_VALUES
+    ):
+        error(
+            "attestation_invalid_field",
+            f"via must be one of {', '.join(sorted(ATTESTATION_VIA_VALUES))}",
+        )
+    note = item.get("note")
+    if note is not None and not _is_str(note):
+        error("attestation_invalid_field", "note must be a string or null")
+    return problems
 
 
 def _validate_provenance(value: Any, error: Any) -> None:
