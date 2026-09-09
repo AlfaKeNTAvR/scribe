@@ -15,8 +15,8 @@ No implementation tasks had been completed at the start of this session.
 | T8 | done | Opus 5 subagent. `scribe new --spec --register --session` creates a validating record with task_refs from state, slug-2 on repeat, supersedes flips predecessor; decide skill has CLAUDE_SESSION_ID and no disable-model-invocation; 14 tests. Template lives at src/scribe/templates/ (I19). |
 | T9 | done | Fable 5.1 subagent. Idempotent ratify, reject then ratify, unattested_review_state and state_behind_attestation heal on re-run, F1 end-to-end restore verified through the injection hook, injected failures heal, concurrent ratifications valid; skills carry disable-model-invocation and an inline uv run line; 15 tests. Main session re-ran the suite: 263 passed. |
 | T10 | done | Fable 5.1 subagent. Shadow logs gate_verdict deny and exits 0, enforce exits 2 with denylist message, ratified action record allows, force-with-lease allows, ExitPlanMode sets decision_worthy, TaskCompleted logs capture_missing; 90 tests. Main session re-ran the suite: 248 passed. |
-| T11 | todo | Not run. |
-| T12 | todo | Not run. |
+| T11 | done | Fable 5.1 subagent. AT clauses (a) to (h) each covered by a named test; hooks installed as sys.executable -m scribe git-hook files; 13 tests plus 1 deferred skip. Main session fixed a same-second amend flake in two tests (GIT_COMMITTER_DATE) and re-ran: 285 passed, 2 skipped. |
+| T12 | done | Opus 5 subagent. `check --base` fails on unreviewed-supersedes-ratified, deleted attestation line, rewritten body (immutable_changed), affects-only branch (F11); passes after ratify and on plain unreviewed; `scribe check --base 3a5b1d2` on this repo: ok; 9 tests plus 1 deferred skip. |
 | T13 | todo | Not run. |
 | T14 | todo | Not run. |
 | T15 | todo | Not run. |
