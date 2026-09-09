@@ -119,7 +119,7 @@ def test_max_ulid_produces_date_diagnostic_not_crash() -> None:
 
 
 def _record_with_verify(tmp_path: Path, verify: list[dict]) -> tuple[Store, object]:
-    """A store-backed record (Q4) so `_validate_pytest_target` can check paths."""
+    """A store-backed record (Q4) so `validate_pytest_target` can check paths."""
     decisions = tmp_path / "docs" / "decisions"
     decisions.mkdir(parents=True)
     record = Record.load(FIXTURES / "valid_minimal.md")
@@ -184,6 +184,53 @@ def test_pytest_verify_entry_rejects_a_target_path_that_does_not_exist(
     )
     problems = validate_record(record.data, record.body, store)
     assert "invalid_verify" in {p.code for p in problems}
+
+
+def test_pytest_verify_entry_rejects_a_target_starting_with_an_option_dash(
+    tmp_path: Path,
+) -> None:
+    """A target starting with `-` reads as a pytest option, not a node id,
+    even when a file by that literal name exists on disk. Fails on the old
+    code: before this rule, `--help` (an existing file at the repo root)
+    passed every prior check (non-empty string, no leading `/` or `~`, no
+    `..`, and the path exists), so `problems` came back empty.
+    """
+    (tmp_path / "--help").write_text("not a test file\n", encoding="utf-8")
+    store, record = _record_with_verify(
+        tmp_path,
+        [
+            {
+                "id": "sample",
+                "engine": "pytest",
+                "target": "--help",
+                "expect": "pass",
+                "severity": "error",
+            }
+        ],
+    )
+    problems = validate_record(record.data, record.body, store)
+    assert "invalid_verify" in {p.code for p in problems}
+
+
+def test_verify_entry_with_a_non_string_engine_is_rejected_without_crashing() -> None:
+    """`engine: []` is unhashable; the old `engine not in {"grep", "pytest"}`
+    membership test raised `TypeError` before `unknown_engine` could be
+    reported. Fails on the old code with a `TypeError` escaping
+    `validate_record` instead of a normal assertion failure.
+    """
+    record = Record.load(FIXTURES / "valid_minimal.md")
+    record.data["verify"] = [
+        {
+            "id": "sample",
+            "engine": [],
+            "pattern": "x",
+            "paths": ["src/x.py"],
+            "expect": "match",
+            "severity": "error",
+        }
+    ]
+    problems = validate_record(record.data, record.body)
+    assert "unknown_engine" in {p.code for p in problems}
 
 
 def test_verify_entry_with_an_unknown_engine_is_rejected() -> None:

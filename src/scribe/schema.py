@@ -458,14 +458,14 @@ def _validate_verify(value: Any, error: Any, store: Store | None = None) -> None
                 "unsupported_engine",
                 "jsonpath is on the README allowlist but not implemented in this release",
             )
-        elif engine not in {"grep", "pytest"}:
+        elif not isinstance(engine, str) or engine not in {"grep", "pytest"}:
             error("unknown_engine", f"unknown verify engine: {engine}")
         if not _in_str_set(item["severity"], {"error", "warning"}):
             error("invalid_verify", "verify severity must be error or warning")
         if engine == "pytest":
             if not _in_str_set(item["expect"], {"pass", "fail"}):
                 error("invalid_verify", "verify expect must be pass or fail")
-            _validate_pytest_target(item.get("target"), error, store)
+            validate_pytest_target(item.get("target"), error, store)
         else:
             if not _is_str(item["pattern"]):
                 error("invalid_verify", "verify pattern must be a string")
@@ -475,12 +475,17 @@ def _validate_verify(value: Any, error: Any, store: Store | None = None) -> None
                 error("invalid_verify", "verify expect must be match or no-match")
 
 
-def _validate_pytest_target(target: Any, error: Any, store: Store | None) -> None:
+def validate_pytest_target(target: Any, error: Any, store: Store | None) -> None:
     """`target` must be a pytest node id `path[::name[::name...]]`, plan Q4.
 
     The path segment (before the first `::`) must exist relative to the repo
     root; that check only runs when a store is available (same limitation as
-    `dangling_reference` above).
+    `dangling_reference` above). A path segment starting with `-` is also
+    rejected: pytest reads such a target as an option, not a node id, so a
+    file literally named `--help` or `--version` must not pass here even
+    though it could exist on disk. Public (no leading underscore) because
+    `lint.py`'s pytest verify runner reuses this exact rule before spawning a
+    subprocess, so the accepted-target definition lives in one place.
     """
     if not _is_str(target) or not target:
         error("invalid_verify", "verify target must be a non-empty string")
@@ -489,7 +494,7 @@ def _validate_pytest_target(target: Any, error: Any, store: Store | None) -> Non
     path = parts[0]
     if (
         not path
-        or path.startswith(("/", "~"))
+        or path.startswith(("/", "~", "-"))
         or any(segment == ".." for segment in path.split("/"))
         or any(not name for name in parts[1:])
     ):

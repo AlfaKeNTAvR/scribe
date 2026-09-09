@@ -71,10 +71,15 @@ see the ratification model below.
 `verify` entries (run by `scribe lint` only) support two engines: `grep`
 (`{pattern, paths}`, a regex checked against files selected by glob) and
 `pytest` (`{target}`, a pytest node id or path run with `uv run --frozen
-pytest -q -x <target>` from the repository root, gated on that repository
-having a `pyproject.toml` that names pytest; bounded by a timeout, 60 seconds
-by default and overridable with `SCRIBE_VERIFY_TIMEOUT`). `jsonpath` is named
-on this allowlist but not implemented in this release.
+pytest -q -x -p no:cacheprovider -- <target>` from the repository root,
+gated on that repository having a `pyproject.toml` that names pytest;
+bounded by a timeout, 60 seconds by default and overridable with
+`SCRIBE_VERIFY_TIMEOUT`, a positive finite number or the default is used).
+`scribe lint` refuses a pytest target the schema validator would reject
+(an option, `..`, an absolute path, or a path that does not exist) before
+spawning anything, and skips a `verify` entry entirely for a record that
+already has a schema error. `jsonpath` is named on this allowlist but not
+implemented in this release.
 
 ## Ratification model
 

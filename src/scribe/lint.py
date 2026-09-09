@@ -13,8 +13,10 @@ restores any predecessor the expired record was holding down.
 
 from __future__ import annotations
 
+import math
 import os
 import re
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -28,7 +30,7 @@ from .index import check_index, write_index
 from .matching import matches
 from .policy import RULE_NAMES
 from .record import Record
-from .schema import validate_record
+from .schema import validate_pytest_target, validate_record
 from .state import ledger_lock_path, load_state, locked, update_state
 from .store import Store, reconcile_supersession
 
@@ -358,10 +360,22 @@ def _stale_proposal_findings(store: Store, today: date, expire: bool) -> list[Fi
     return _expire_stale(store, today)
 
 
-def _verify_findings(store: Store, files: list[str]) -> list[Finding]:
+def _verify_findings(
+    store: Store, files: list[str], invalid_paths: frozenset[str] = frozenset()
+) -> list[Finding]:
+    """Runs every `verify` entry, skipping records `_validate_findings` already
+    flagged with an error (`invalid_paths`, relative paths): a record with a
+    malformed `verify` entry, or any other schema error, already has its
+    problem reported once; running verify against it besides risks a second,
+    confusing finding for the same root cause (or, before this fix, hides the
+    problem entirely when the verify entry happens to spawn something that
+    exits the way `expect` wants).
+    """
     findings: list[Finding] = []
     for record in store.records():
         relative = _relative(store, record.path)
+        if relative in invalid_paths:
+            continue
         for entry in record.data.get("verify") or []:
             if not isinstance(entry, dict):
                 continue
@@ -382,7 +396,7 @@ def _run_verify_entry(
     """One `verify` entry against the working tree, plan 4.4 glob semantics."""
     entry_id = str(entry.get("id", "?"))
     severity = entry.get("severity")
-    if severity not in {"error", "warning"}:
+    if not isinstance(severity, str) or severity not in {"error", "warning"}:
         severity = "error"
     pattern = entry.get("pattern")
     globs = [item for item in (entry.get("paths") or []) if isinstance(item, str)]
@@ -454,13 +468,18 @@ def _run_verify_entry(
 
 
 def _verify_timeout_seconds() -> float:
+    """`SCRIBE_VERIFY_TIMEOUT`, or the default for anything not a positive,
+    finite number (unset, unparseable, `nan`, `inf`, zero, or negative)."""
     raw = os.environ.get("SCRIBE_VERIFY_TIMEOUT")
     if raw is None:
         return DEFAULT_VERIFY_TIMEOUT_SECONDS
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         return DEFAULT_VERIFY_TIMEOUT_SECONDS
+    if not math.isfinite(value) or value <= 0:
+        return DEFAULT_VERIFY_TIMEOUT_SECONDS
+    return value
 
 
 def _pytest_available(root: Path) -> bool:
@@ -477,6 +496,42 @@ def _pytest_available(root: Path) -> bool:
         return False
 
 
+def _pytest_target_problem(target: Any, store: Store) -> str | None:
+    """First message `schema.validate_pytest_target` raises against `target`, if any.
+
+    One shared rule (schema.py Q4) decides what a pytest verify target may
+    be; this only adapts that rule's `error(code, message)` callback into a
+    plain message so the runner below can reject before spawning anything.
+    """
+    problems: list[str] = []
+
+    def error(code: str, message: str) -> None:
+        problems.append(message)
+
+    validate_pytest_target(target, error, store)
+    return problems[0] if problems else None
+
+
+def _kill_verify_process_group(process: subprocess.Popen[str]) -> None:
+    """Kill the whole process group a timed-out verify subprocess started.
+
+    `start_new_session=True` (POSIX only) made `process.pid` the process
+    group id for `uv run ... pytest ...` and everything it spawns, so
+    `os.killpg` reaches pytest and any grandchild a slow test itself started
+    (e.g. `test_slow`'s own subprocess), not just the direct `uv` child a
+    plain `process.kill()` would leave running. No process group exists on
+    Windows (`os.killpg` is not available there), so this falls back to
+    killing the direct child only.
+    """
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            return
+        except OSError:
+            pass
+    process.kill()
+
+
 def _run_pytest_verify_entry(
     store: Store,
     entry: dict[str, Any],
@@ -484,22 +539,31 @@ def _run_pytest_verify_entry(
 ) -> list[Finding]:
     """One `verify` entry with `engine: pytest`, mirroring the grep engine above.
 
-    Runs `uv run --frozen pytest -q -x <target>` from the repository root.
-    `expect: pass` wants exit code 0, `expect: fail` wants exit code 1;
-    anything else (timeout, missing pytest, a collection or usage error) is
-    `verify_error`, never a crash out of lint.
+    Runs `uv run --frozen pytest -q -x -p no:cacheprovider -- <target>` from
+    the repository root. `expect: pass` wants exit code 0, `expect: fail`
+    wants exit code 1; anything else (timeout, missing pytest, a collection
+    or usage error) is `verify_error`, never a crash out of lint.
+
+    The target is rejected up front through `schema.validate_pytest_target`,
+    the same rule `scribe validate` enforces, so an entry validate would
+    reject (an option such as `--version`, `..`, an absolute path, or a path
+    that does not exist) never reaches a pytest subprocess here either. The
+    `--` before `<target>` on the command line is a second, independent
+    layer: even a target the validator somehow let through cannot be read by
+    pytest as another option.
     """
     entry_id = str(entry.get("id", "?"))
     severity = entry.get("severity")
-    if severity not in {"error", "warning"}:
+    if not isinstance(severity, str) or severity not in {"error", "warning"}:
         severity = "error"
     target = entry.get("target")
-    if not isinstance(target, str) or not target:
+    target_problem = _pytest_target_problem(target, store)
+    if target_problem is not None:
         return [
             Finding(
                 "error",
                 "verify_error",
-                f"verify {entry_id}: target is not a string",
+                f"verify {entry_id}: {target_problem}",
                 relative,
             )
         ]
@@ -513,25 +577,27 @@ def _run_pytest_verify_entry(
             )
         ]
     timeout = _verify_timeout_seconds()
-    command = ["uv", "run", "--frozen", "pytest", "-q", "-x", target]
+    command = [
+        "uv",
+        "run",
+        "--frozen",
+        "pytest",
+        "-q",
+        "-x",
+        "-p",
+        "no:cacheprovider",
+        "--",
+        target,
+    ]
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=store.root,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
+            start_new_session=os.name == "posix",
         )
-    except subprocess.TimeoutExpired:
-        return [
-            Finding(
-                "error",
-                "verify_error",
-                f"verify {entry_id}: pytest timed out after {timeout:g}s running "
-                f"{target}",
-                relative,
-            )
-        ]
     except OSError as exc:
         return [
             Finding(
@@ -541,17 +607,32 @@ def _run_pytest_verify_entry(
                 relative,
             )
         ]
-    if result.returncode not in (0, 1):
+    try:
+        process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_verify_process_group(process)
+        process.communicate()
+        return [
+            Finding(
+                "error",
+                "verify_error",
+                f"verify {entry_id}: pytest timed out after {timeout:g}s running "
+                f"{target}",
+                relative,
+            )
+        ]
+    returncode = process.returncode
+    if returncode not in (0, 1):
         return [
             Finding(
                 "error",
                 "verify_error",
                 f"verify {entry_id}: pytest collection or usage error running "
-                f"{target} (exit {result.returncode})",
+                f"{target} (exit {returncode})",
                 relative,
             )
         ]
-    passed = result.returncode == 0
+    passed = returncode == 0
     expect_pass = entry.get("expect") != "fail"
     if passed != expect_pass:
         outcome = "passed" if passed else "failed"
@@ -623,11 +704,15 @@ def lint_store(
     reference_day = today or datetime.now(timezone.utc).date()
     resolved_base, findings = resolve_base(base, store.root)
     findings.extend(_duplicate_identity(store))
-    findings.extend(_validate_findings(store))
+    validate_findings = _validate_findings(store)
+    findings.extend(validate_findings)
+    invalid_paths = frozenset(
+        finding.path for finding in validate_findings if finding.severity == "error"
+    )
     findings.extend(_base_findings(store, resolved_base))
     findings.extend(_lifecycle_findings(store, reference_day))
     findings.extend(_stale_proposal_findings(store, reference_day, expire))
-    findings.extend(_verify_findings(store, _repo_files(store.root)))
+    findings.extend(_verify_findings(store, _repo_files(store.root), invalid_paths))
     findings.extend(_pending_findings(store))
     findings.extend(_index_findings(store, fix_index))
     return findings

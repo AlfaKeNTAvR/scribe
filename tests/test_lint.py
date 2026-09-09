@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import subprocess
 import textwrap
 import time
@@ -21,9 +22,17 @@ from typing import Any
 import pytest
 from scribe import ulid
 from scribe.frontmatter import join, split
-from scribe.lint import STALE_PROPOSAL_DAYS, run_lint
+from scribe.lint import (
+    DEFAULT_VERIFY_TIMEOUT_SECONDS,
+    STALE_PROPOSAL_DAYS,
+    _run_pytest_verify_entry,
+    _run_verify_entry,
+    _verify_timeout_seconds,
+    run_lint,
+)
 from scribe.record import Record
 from scribe.state import ledger_lock_path, update_state
+from scribe.store import Store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = (
@@ -621,7 +630,9 @@ def pytest_project(repo: Path) -> None:
     (tests_dir / "test_target.py").write_text(
         textwrap.dedent(
             """\
+            import subprocess
             import time
+            from pathlib import Path
 
 
             def test_ok():
@@ -634,6 +645,12 @@ def pytest_project(repo: Path) -> None:
 
             def test_slow():
                 time.sleep(5)
+
+
+            def test_spawn_grandchild_and_sleep():
+                child = subprocess.Popen(["sleep", "30"])
+                Path("grandchild.pid").write_text(str(child.pid))
+                time.sleep(30)
             """
         ),
         encoding="utf-8",
@@ -747,6 +764,254 @@ def test_a_pytest_verify_entry_without_a_pytest_project_reports_verify_error(
     assert code == 1
     assert find(findings, "verify_error")["severity"] == "error"
     assert "invalid_verify" not in codes(findings)
+
+
+def _forbid_pytest_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make lint's own pytest-spawning `subprocess.Popen` call fail loudly.
+
+    Old code did not validate `target` before spawning, so `pytest --version`
+    (a real, exit-0 subprocess) ran and lint reported nothing wrong. New code
+    must reject the target in `_pytest_target_problem` before it ever reaches
+    `subprocess.Popen` (the verify runner spawns pytest through `Popen`, not
+    `subprocess.run`, so it can kill the whole process group on a timeout).
+    `subprocess` is one shared module object, and `Store.discover` (store.py)
+    also calls `subprocess.run` for `git rev-parse` during the same lint run,
+    so this only guards `Popen` and leaves every `subprocess.run` call (git)
+    untouched.
+    """
+    real_popen = subprocess.Popen
+
+    def guarded_popen(command: Any, *args: Any, **kwargs: Any) -> Any:
+        if "pytest" in command:
+            raise AssertionError(
+                "scribe lint must not spawn pytest for a rejected target"
+            )
+        return real_popen(command, *args, **kwargs)
+
+    monkeypatch.setattr("scribe.lint.subprocess.Popen", guarded_popen)
+
+
+def test_a_pytest_target_with_an_option_never_runs_pytest(
+    run_cli: RunCli, lint_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--version` is not a path; `schema.validate_pytest_target` rejects it
+    (leading `-` is an option, not a node id), so `_validate_findings`
+    already reports `invalid_verify` for this record and `_verify_findings`
+    skips it, never reaching the pytest runner's own (redundant) check.
+    The old runner checked only that `target` is a non-empty string, so
+    `pytest --version` actually ran, exited 0, and matched `expect: pass`.
+    Fails on the old code because the monkeypatch's own assertion fires:
+    old code spawns pytest for this target regardless of the pre-existing
+    validation error.
+    """
+    pytest_project(lint_repo)
+    _forbid_pytest_subprocess(monkeypatch)
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[pytest_entry(target="--version")],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "invalid_verify")["severity"] == "error"
+    assert "verify_error" not in codes(findings)
+
+
+def test_a_pytest_target_with_an_absolute_path_never_runs_pytest(
+    run_cli: RunCli, lint_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An absolute path is rejected by `schema.validate_pytest_target` (must
+    be relative to the repo root), so, like the option case above, the
+    record is flagged `invalid_verify` by validate and its verify entry is
+    skipped. The old runner had no target check at all and would have
+    spawned pytest against `/etc/passwd`; fails on the old code on the
+    monkeypatch's assertion, since old code calls `subprocess.Popen`/
+    `subprocess.run` for it regardless of the pre-existing validation error.
+    """
+    pytest_project(lint_repo)
+    _forbid_pytest_subprocess(monkeypatch)
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[pytest_entry(target="/etc/passwd")],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "invalid_verify")["severity"] == "error"
+    assert "verify_error" not in codes(findings)
+
+
+def test_a_valid_pytest_target_still_runs_and_leaves_no_pytest_cache(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    """A target `validate_pytest_target` accepts still runs pytest for real
+    (no monkeypatch here) and must pass `-p no:cacheprovider`, so linting
+    leaves no `.pytest_cache` behind in the linted repository. Fails on the
+    old code on the last assertion: the old command had no `-p
+    no:cacheprovider`, so pytest wrote `.pytest_cache` at the repo root.
+    """
+    pytest_project(lint_repo)
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[pytest_entry()],
+    )
+    assert run_cli(["index"], lint_repo)[0] == 0
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 0
+    assert findings == []
+    assert not (lint_repo / ".pytest_cache").exists()
+
+
+def test_lint_skips_verify_for_a_record_with_an_existing_validate_error(
+    run_cli: RunCli, lint_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record whose `verify` entry itself fails schema validation (a
+    pytest target the validator rejects) must not also have that entry
+    executed: `_validate_findings` already reported the problem once, and
+    running the entry besides risks a second, confusing finding for the
+    same root cause. Old code ran `_verify_findings` over every record
+    unconditionally, so the pytest-spawning `subprocess.Popen` call
+    happened anyway; the monkeypatch's own assertion catches that.
+    """
+    pytest_project(lint_repo)
+    _forbid_pytest_subprocess(monkeypatch)
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[pytest_entry(target="does/not/exist.py::test_ok")],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "invalid_verify")["severity"] == "error"
+    assert "verify_error" not in codes(findings)
+
+
+def test_a_verify_entry_with_a_non_string_severity_does_not_crash(
+    tmp_path: Path,
+) -> None:
+    """`severity: []` is unhashable; the old `severity not in {...}`
+    membership test in `_run_verify_entry` raised `TypeError` before it
+    could report anything. New code type-checks first and falls back to
+    `error`. Called directly (not through `scribe lint`): schema.py already
+    rejects a non-string severity for every engine, and the record-level
+    skip added above means `scribe lint` itself never reaches this
+    function for such a record; the crash this guards against is still
+    real for `_run_verify_entry` as a unit, and for any future caller.
+    Fails on the old code with a `TypeError` instead of a clean return.
+    """
+    (tmp_path / "docs" / "decisions").mkdir(parents=True)
+    store = Store(tmp_path)
+    entry = {
+        "id": "sample",
+        "engine": "grep",
+        "pattern": "x",
+        "paths": ["missing/**"],
+        "expect": "match",
+        "severity": [],
+    }
+    findings = _run_verify_entry(store, entry, [], "docs/decisions/D-x.md")
+    assert findings[0].severity == "error"
+    assert findings[0].code == "verify_failed"
+
+
+def test_a_pytest_verify_entry_with_a_non_string_severity_does_not_crash(
+    tmp_path: Path,
+) -> None:
+    """The pytest engine's own `severity not in {...}` check in
+    `_run_pytest_verify_entry` has the same unhashable-value crash as the
+    grep engine above, and is fixed and tested the same way, directly.
+    Fails on the old code with a `TypeError` instead of a clean return.
+    """
+    (tmp_path / "docs" / "decisions").mkdir(parents=True)
+    store = Store(tmp_path)
+    entry = {
+        "id": "sample",
+        "engine": "pytest",
+        "target": "tests/does_not_exist.py::test_ok",
+        "expect": "pass",
+        "severity": [],
+    }
+    findings = _run_pytest_verify_entry(store, entry, "docs/decisions/D-x.md")
+    assert findings[0].code == "verify_error"
+
+
+def test_verify_timeout_env_var_rejects_nan_and_falls_back_to_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`nan` parses as a `float` without raising, so the old code's bare
+    `except ValueError` let it through as the timeout; `subprocess.run(...,
+    timeout=float("nan"))` then raises `ValueError` itself the moment it
+    compares against the clock. Fails on the old code: it returns `nan`
+    instead of the default.
+    """
+    monkeypatch.setenv("SCRIBE_VERIFY_TIMEOUT", "nan")
+    assert _verify_timeout_seconds() == DEFAULT_VERIFY_TIMEOUT_SECONDS
+
+
+def test_verify_timeout_env_var_rejects_infinity_and_zero_and_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`inf`, `0`, and a negative number all parse as valid `float`s that
+    are not a usable subprocess timeout (never times out, or times out
+    immediately / before starting). Fails on the old code, which returned
+    each of these verbatim instead of the default.
+    """
+    for raw in ("inf", "-inf", "0", "-5"):
+        monkeypatch.setenv("SCRIBE_VERIFY_TIMEOUT", raw)
+        assert _verify_timeout_seconds() == DEFAULT_VERIFY_TIMEOUT_SECONDS, raw
+
+
+def test_a_timed_out_pytest_verify_entry_leaves_no_grandchild_process(
+    run_cli: RunCli, lint_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow pytest test that itself spawns a subprocess (`sleep 30`) must
+    not leave that grandchild running after lint's own timeout fires: the
+    old code's `subprocess.run(..., timeout=...)` kills only the direct
+    `uv` child on `TimeoutExpired`, orphaning `sleep` (and pytest under it)
+    to run out its full duration. New code starts the spawned `uv run
+    pytest` in its own session (`start_new_session=True`) and kills the
+    whole process group (`os.killpg`) on timeout. Fails on the old code on
+    the last assertion: the grandchild `sleep` pid is still alive right
+    after lint returns.
+    """
+    pytest_project(lint_repo)
+    monkeypatch.setenv("SCRIBE_VERIFY_TIMEOUT", "8")
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[
+            pytest_entry(target="tests/test_target.py::test_spawn_grandchild_and_sleep")
+        ],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "verify_error")["severity"] == "error"
+    pid_file = lint_repo / "grandchild.pid"
+    for _ in range(100):
+        if pid_file.exists():
+            break
+        time.sleep(0.1)
+    assert pid_file.exists(), "the grandchild test never started"
+    grandchild_pid = int(pid_file.read_text(encoding="utf-8").strip())
+    time.sleep(0.5)
+    with pytest.raises(ProcessLookupError):
+        os.kill(grandchild_pid, 0)
 
 
 # --- scratch state ------------------------------------------------------------
