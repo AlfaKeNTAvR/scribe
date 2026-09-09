@@ -5,6 +5,7 @@ The hooks are installed as files that call `sys.executable -m scribe git-hook
 """
 
 import fcntl
+import io
 import json
 import os
 import subprocess
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from scribe.githooks import post_commit as post_commit_module
+from scribe.githooks import post_rewrite as post_rewrite_module
 from scribe.githooks import prepare_commit_msg
 from scribe.links import add_link, implementation_paths
 from scribe.newrecord import create_record, load_spec
@@ -24,7 +26,7 @@ from scribe.store import Store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SPEC = PROJECT_ROOT / "tests" / "fixtures" / "new_spec.json"
-HOOKS = ("prepare-commit-msg", "commit-msg", "post-commit")
+HOOKS = ("prepare-commit-msg", "commit-msg", "post-commit", "post-rewrite")
 SESSION = "session-t11"
 
 # Real records: A governs src/scribe/index.py and check.py, C is unrelated to both.
@@ -459,9 +461,13 @@ def test_unrelated_staged_file_gets_no_trailer(hooked_repo: Path) -> None:
 # --- (d) and (d2): amend -----------------------------------------------------
 
 
-def test_amend_keeps_one_trailer_and_adds_a_link_for_the_new_sha(
+def test_amend_keeps_one_trailer_and_relinks_to_the_new_sha(
     hooked_repo: Path,
 ) -> None:
+    """post-rewrite (O5/Q3) now prunes the stale sha itself: post-commit still
+    appends a link for the new sha first, leaving both shas linked for a
+    moment, but the post-rewrite hook that follows the amend runs `scribe
+    relink` and drops the now-unreachable old sha before the commit returns."""
     record, _, old_sha = record_then_implement(hooked_repo)
     alias, ulid = record.data["alias"], record.data["id"]
 
@@ -475,9 +481,10 @@ def test_amend_keeps_one_trailer_and_adds_a_link_for_the_new_sha(
         f"Decision: {alias} {ulid}"
     ]
     saved = load(hooked_repo, alias)
-    assert link_commits(saved) == {old_sha[:12], new_sha[:12]}
+    assert link_commits(saved) == {new_sha[:12]}
     assert saved.data["effective_state"] == "implemented"
     assert [item["event"] for item in saved.data["history"]].count("implemented") == 1
+    assert [item["event"] for item in saved.data["history"]].count("relinked") == 1
 
 
 def test_amend_with_a_newly_pending_decision_adds_its_trailer_and_link(
@@ -495,16 +502,229 @@ def test_amend_with_a_newly_pending_decision_adds_its_trailer_and_link(
         f"Decision: {first.data['alias']} {first.data['id']}",
         f"Decision: {second.data['alias']} {second.data['id']}",
     ]
-    assert link_commits(load(hooked_repo, first.data["alias"])) == {
-        old_sha[:12],
-        new_sha[:12],
-    }
+    # post-rewrite relinks first's stale old_sha away, same as the amend-only
+    # case above; second never had a stale link to begin with.
+    assert link_commits(load(hooked_repo, first.data["alias"])) == {new_sha[:12]}
     saved_second = load(hooked_repo, second.data["alias"])
     assert saved_second.data["implementation_links"] == [
         {"commit": new_sha[:12], "paths": ["src/x.py"]}
     ]
     assert saved_second.data["effective_state"] == "implemented"
     assert pending_ids(hooked_repo) == []
+
+
+# --- post-rewrite: relink on amend/rebase (O5, Q3) ---------------------------
+
+
+def test_rebase_onto_end_to_end_leaves_both_records_linked_to_new_shas(
+    hooked_repo: Path,
+) -> None:
+    """End-to-end smoke test: a real interactive-free `git rebase --onto`
+    over a two-commit range fires post-rewrite for real (kind "rebase"), and
+    the run finishes with both records linked to their rewritten shas and
+    neither original sha left in any link. post-commit itself already
+    relinks each commit as it gets replayed (confirmed empirically: it fires
+    per replayed commit here too), so this test does not pin down which of
+    the two hooks did the writing -- see the more surgical test below for
+    that half of the contract."""
+    first = new_pending(hooked_repo, ["src/a.py"], "First rebase record")
+    commit(hooked_repo, "docs: Add the first record", "docs/decisions")
+    second = new_pending(hooked_repo, ["src/b.py"], "Second rebase record")
+    commit(hooked_repo, "docs: Add the second record", "docs/decisions")
+    base = head(hooked_repo)
+    branch = git(hooked_repo, "branch", "--show-current").stdout.strip()
+
+    write(hooked_repo, "src/a.py")
+    commit(hooked_repo, "feat: Implement a", "src/a.py")
+    old_a = head(hooked_repo)
+
+    write(hooked_repo, "src/b.py")
+    commit(hooked_repo, "feat: Implement b", "src/b.py")
+    old_b = head(hooked_repo)
+
+    # The dirty post-commit leftovers (unstaged record/INDEX.md changes)
+    # don't matter to this smoke test; discard them so the rebase starts
+    # from a clean tree.
+    git(hooked_repo, "reset", "--hard", "HEAD")
+
+    # A sibling of `base`, not a descendant, so `--onto` actually moves the
+    # two-commit range rather than replaying it in place.
+    git(hooked_repo, "checkout", "-q", base)
+    write(hooked_repo, "unrelated.txt")
+    commit(hooked_repo, "chore: unrelated base change", "unrelated.txt")
+    new_base = head(hooked_repo)
+
+    git(hooked_repo, "checkout", "-q", branch)
+    git(hooked_repo, "rebase", "--onto", new_base, base, branch)
+
+    reachable = set(git(hooked_repo, "rev-list", "--all").stdout.split())
+    assert old_a not in reachable
+    assert old_b not in reachable
+    new_a = git(
+        hooked_repo, "log", "--format=%H", "--grep=Implement a", "-1"
+    ).stdout.strip()
+    new_b = git(
+        hooked_repo, "log", "--format=%H", "--grep=Implement b", "-1"
+    ).stdout.strip()
+    assert new_a and new_a != old_a
+    assert new_b and new_b != old_b
+
+    saved_first = load(hooked_repo, first.data["alias"])
+    saved_second = load(hooked_repo, second.data["alias"])
+    assert saved_first.data["implementation_links"] == [
+        {"commit": new_a[:12], "paths": ["src/a.py"]}
+    ]
+    assert saved_second.data["implementation_links"] == [
+        {"commit": new_b[:12], "paths": ["src/b.py"]}
+    ]
+
+
+def test_post_rewrite_after_rebase_relinks_both_records_and_drops_stale_shas(
+    hooked_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The surgical half of the contract above: two links already stale (as
+    `scribe relink` or a hand fix-up would have left them, pointing at shas a
+    rebase is about to make unreachable) get refreshed once `post_rewrite`
+    itself runs. `SCRIBE_SKIP_HOOKS=1` keeps post-commit from also relinking
+    each replayed commit for real here, isolating exactly what `run_relink`
+    (called through `post_rewrite.run`) does with a rewritten history -- the
+    same contract the amend tests above exercise for a single commit."""
+    first = new_pending(hooked_repo, ["src/a.py"], "First rebase record")
+    commit(hooked_repo, "docs: Add the first record", "docs/decisions")
+    second = new_pending(hooked_repo, ["src/b.py"], "Second rebase record")
+    commit(hooked_repo, "docs: Add the second record", "docs/decisions")
+    base = head(hooked_repo)
+    branch = git(hooked_repo, "branch", "--show-current").stdout.strip()
+
+    # SCRIBE_SKIP_HOOKS disables prepare-commit-msg too, so the Decision
+    # trailer that hook would normally add has to be written by hand here
+    # (same trick as `commit_implementation_without_post_commit` above).
+    skip = {"SCRIBE_SKIP_HOOKS": "1"}
+    write(hooked_repo, "src/a.py")
+    commit(
+        hooked_repo,
+        f"feat: Implement a\n\nDecision: {first.data['alias']} {first.data['id']}\n",
+        "src/a.py",
+        env=skip,
+    )
+    stale_a = head(hooked_repo)
+
+    write(hooked_repo, "src/b.py")
+    commit(
+        hooked_repo,
+        f"feat: Implement b\n\nDecision: {second.data['alias']} {second.data['id']}\n",
+        "src/b.py",
+        env=skip,
+    )
+    stale_b = head(hooked_repo)
+
+    # Fabricate the stale-but-committed links a live repo would already have
+    # on disk (from an earlier `scribe relink` or from post-commit, neither
+    # of which ran above because of SCRIBE_SKIP_HOOKS) before the rebase
+    # makes stale_a/stale_b unreachable.
+    for record, sha, path in (
+        (first, stale_a, "src/a.py"),
+        (second, stale_b, "src/b.py"),
+    ):
+        assert add_link(record, sha, [path], "test", "2026-09-09T00:00:00Z")
+        record.save()
+    git(hooked_repo, "add", "-A")
+    git(hooked_repo, "commit", "-q", "-m", "chore: pick up backlinks", env=skip)
+    branch_tip = head(hooked_repo)
+
+    git(hooked_repo, "checkout", "-q", base)
+    write(hooked_repo, "unrelated.txt")
+    commit(hooked_repo, "chore: unrelated base change", "unrelated.txt", env=skip)
+    new_base = head(hooked_repo)
+
+    git(hooked_repo, "checkout", "-q", branch)
+    git(hooked_repo, "rebase", "--onto", new_base, base, branch_tip, env=skip)
+    git(hooked_repo, "branch", "-f", branch, "HEAD")
+    git(hooked_repo, "checkout", "-q", branch)
+
+    reachable = set(git(hooked_repo, "rev-list", "--all").stdout.split())
+    assert stale_a not in reachable
+    assert stale_b not in reachable
+    new_a = git(
+        hooked_repo, "log", "--format=%H", "--grep=Implement a", "-1"
+    ).stdout.strip()
+    new_b = git(
+        hooked_repo, "log", "--format=%H", "--grep=Implement b", "-1"
+    ).stdout.strip()
+    assert new_a and new_a != stale_a
+    assert new_b and new_b != stale_b
+    # post-commit never ran (skipped above): still stale on disk.
+    assert load(hooked_repo, first.data["alias"]).data["implementation_links"] == [
+        {"commit": stale_a[:12], "paths": ["src/a.py"]}
+    ]
+
+    monkeypatch.chdir(hooked_repo)
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO(f"{stale_a} {new_a}\n{stale_b} {new_b}\n")
+    )
+    os.environ.pop(post_rewrite_module.GUARD_ENV, None)
+    try:
+        code = post_rewrite_module.run(["rebase"])
+    finally:
+        os.environ.pop(post_rewrite_module.GUARD_ENV, None)
+
+    stderr = capsys.readouterr().err
+    assert code == 0
+    assert "scribe: relinked 2 record(s) after rebase" in stderr
+    saved_first = load(hooked_repo, first.data["alias"])
+    saved_second = load(hooked_repo, second.data["alias"])
+    assert saved_first.data["implementation_links"] == [
+        {"commit": new_a[:12], "paths": ["src/a.py"]}
+    ]
+    assert saved_second.data["implementation_links"] == [
+        {"commit": new_b[:12], "paths": ["src/b.py"]}
+    ]
+
+
+def test_post_rewrite_writes_nothing_when_no_record_is_involved(
+    hooked_repo: Path,
+) -> None:
+    write(hooked_repo, "notes.md")
+    commit(hooked_repo, "docs: Notes with no decision trailer", "notes.md")
+    before = git(hooked_repo, "status", "--porcelain").stdout
+
+    result = git(hooked_repo, "commit", "-q", "--amend", "--no-edit", env=AMEND_LATER)
+
+    assert "scribe: relinked" not in result.stderr
+    assert git(hooked_repo, "status", "--porcelain").stdout == before
+
+
+def test_post_rewrite_lock_timeout_fails_open_without_writing(
+    hooked_repo: Path,
+) -> None:
+    """V8/V9: same fail-open contract as post-commit's lock-timeout test, but
+    for the post-rewrite hook: a lock held past the timeout writes nothing,
+    and the amend that triggered the hook still succeeds (exit 0). post-commit
+    also shares this lock, so nothing about the record changes at all: no new
+    link for the amended sha, and no relink notice."""
+    record, _, old_sha = record_then_implement(hooked_repo)
+    alias = str(record.data["alias"])
+    before = load(hooked_repo, alias).data
+    del old_sha
+
+    lock_path = ledger_lock_path(hooked_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        result = git(
+            hooked_repo, "commit", "-q", "--amend", "--no-edit", env=AMEND_LATER
+        )
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    assert elapsed >= 2.0
+    assert result.returncode == 0
+    assert "ledger lock timeout" in result.stderr
+    assert "scribe: relinked" not in result.stderr
+    assert load(hooked_repo, alias).data == before
 
 
 # --- (e): Session trailer ----------------------------------------------------

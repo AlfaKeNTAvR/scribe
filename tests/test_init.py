@@ -96,7 +96,7 @@ def commit_all(repo: Path, message: str) -> str:
 # --- the happy path (AT clauses 1 to 5) --------------------------------------
 
 
-def test_init_installs_three_managed_executable_hooks(
+def test_init_installs_four_managed_executable_hooks(
     run_cli: RunCli, tmp_repo: Path
 ) -> None:
     code, stdout = init_with_ci(run_cli, tmp_repo)
@@ -113,7 +113,12 @@ def test_init_installs_three_managed_executable_hooks(
         assert 'supervise.run(["git-hook", HOOK]' in text
         assert os.access(hook, os.X_OK)
         assert f"scribe init: wrote .git/hooks/{name}" in stdout
-    assert set(HOOK_NAMES) == {"prepare-commit-msg", "commit-msg", "post-commit"}
+    assert set(HOOK_NAMES) == {
+        "prepare-commit-msg",
+        "commit-msg",
+        "post-commit",
+        "post-rewrite",
+    }
 
 
 def test_init_appends_the_scratch_dir_to_gitignore(
@@ -335,7 +340,7 @@ def test_foreign_commit_msg_is_kept_with_exit_one(
         encoding="utf-8"
     ) == FOREIGN_HOOK
     assert not (hooks_dir(tmp_repo) / "commit-msg.pre-scribe").exists()
-    for name in ("prepare-commit-msg", "post-commit"):
+    for name in ("prepare-commit-msg", "post-commit", "post-rewrite"):
         assert "# scribe-managed" in (hooks_dir(tmp_repo) / name).read_text(
             encoding="utf-8"
         )

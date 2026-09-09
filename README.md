@@ -45,10 +45,10 @@ environment that has scribe installed).
 | `reject <alias-or-ulid> [note]` | Same as `ratify`, verdict `rejected`. |
 | `check --base <ref> [--allow-dirty]` | The CI merge gate: fails a pull request that introduces or depends on an unreviewed record superseding a ratified one, or that breaks the append-only or immutability rules. Deleting a record that was present at the base ref also fails the check (`record_deleted`); retire it with `expired` or `backtracked` instead. Refuses to run when `docs/decisions` has uncommitted changes (they could mask or fake the committed result), unless `--allow-dirty` is given. |
 | `lint` | Store-wide rules over every record: stale index, immutable-field changes, unattested review states, expired proposals, `verify` entries, and more (plan section 4.12). |
-| `init [--force] [--hooks-dir DIR] [--ci-source SPEC]` | Installs the git hook shims, `.claude/scribe/config.json`, the `RATIFICATIONS.jsonl` deny rule in `.claude/settings.json`, and (with `--ci-source`) the `scribe-check.yml` workflow, into the current repository. |
-| `relink` | Rebuilds every record's `implementation_links` from git history: reachable linked commits are kept and refreshed, unreachable ones (post-amend, post-rebase) are dropped, missing ones are added. No range option; always looks at the whole history. |
+| `init [--force] [--hooks-dir DIR] [--ci-source SPEC]` | Installs the git hook shims (`prepare-commit-msg`, `commit-msg`, `post-commit`, `post-rewrite`), `.claude/scribe/config.json`, the `RATIFICATIONS.jsonl` deny rule in `.claude/settings.json`, and (with `--ci-source`) the `scribe-check.yml` workflow, into the current repository. |
+| `relink` | Rebuilds every record's `implementation_links` from git history: reachable linked commits are kept and refreshed, unreachable ones (post-amend, post-rebase) are dropped, missing ones are added. No range option; always looks at the whole history. `git commit --amend` and `git rebase` already trigger this automatically through the `post-rewrite` hook; run it by hand for a history rewritten somewhere the hook never ran, for example on another clone. |
 | `hook <event>` | Entry point for a Claude Code hook; reads the event payload as JSON on stdin. Not meant to be run by hand. |
-| `git-hook <name> [args...]` | Entry point for a git hook (`prepare-commit-msg`, `commit-msg`, `post-commit`); this is what the shims `scribe init` writes actually call. Not meant to be run by hand. |
+| `git-hook <name> [args...]` | Entry point for a git hook (`prepare-commit-msg`, `commit-msg`, `post-commit`, `post-rewrite`); this is what the shims `scribe init` writes actually call. Not meant to be run by hand. |
 | `--version` | Prints the installed scribe version and the path it was loaded from. |
 
 ## Record format
@@ -139,10 +139,15 @@ default:
   verdict, log it to `.claude/scribe/gate-log.jsonl`, and still exit 0. They
   only start blocking once a repository's `.claude/scribe/config.json` sets
   `SCRIBE_GATES: enforce`; `scribe init` never sets this itself.
-- The git hooks (`prepare-commit-msg`, `commit-msg`, `post-commit`) never
-  fail a commit in this release: exceptions are logged and the hook exits 0.
-  `commit-msg` prints warnings by default (`SCRIBE_COMMIT_MSG: warn`); an
-  `enforce` value in the same config file turns three of its checks fatal.
+- The git hooks (`prepare-commit-msg`, `commit-msg`, `post-commit`,
+  `post-rewrite`) never fail a commit, amend or rebase in this release:
+  exceptions are logged and the hook exits 0. `commit-msg` prints warnings by
+  default (`SCRIBE_COMMIT_MSG: warn`); an `enforce` value in the same config
+  file turns three of its checks fatal. `post-rewrite` runs the same relink
+  as `scribe relink` after `git commit --amend` and `git rebase`, so
+  implementation links stay current across a rewrite without a manual step;
+  it shares the V8 ledger lock with the other three writers, so a lock
+  timeout prints one line and writes nothing, same as `post-commit`.
 - `uv` itself is covered too. Every registered hook command and every git
   shim runs `uv run ... scribe` through `hooks/supervise.py`, a stdlib-only
   Python script (system `python3`, 3.8 or newer). If uv cannot start (missing

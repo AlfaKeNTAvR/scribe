@@ -24,7 +24,7 @@ from scribe.config import DEFAULTS, config_path, write_config
 from scribe.index import write_index
 from scribe.store import Store
 
-HOOK_NAMES = ("prepare-commit-msg", "commit-msg", "post-commit")
+HOOK_NAMES = ("prepare-commit-msg", "commit-msg", "post-commit", "post-rewrite")
 MARKER = "# scribe-managed"
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 SHIM_TEMPLATE = TEMPLATES / "githook_shim.py"

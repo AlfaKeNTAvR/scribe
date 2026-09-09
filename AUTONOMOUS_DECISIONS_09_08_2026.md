@@ -216,3 +216,7 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 - I121 (Q4). The "pytest available" gate is textual (pyproject exists and mentions pytest); true absence still surfaces as `verify_error` from the subprocess.
 - I122 (Q4). pytest exit codes other than 0 and 1 (collection error, usage error, nothing collected, interrupted) map to `verify_error`; timeout default 60 s, `SCRIBE_VERIFY_TIMEOUT` overrides.
 - I123 (Q4). Reused existing codes `verify_failed`, `verify_error`, `invalid_verify`, `unknown_engine`; README gained a verify-engines paragraph under Record format (none existed before).
+- I124 (Q3, worktree agent). `post-rewrite` reuses `run_relink` over the whole history rather than scoping to the old/new sha pairs on stdin; stdin is drained defensively and never blocks.
+- I125 (Q3). The notice mirrors post-commit (`scribe: relinked N record(s) after <kind>`); the re-entry guard is `SCRIBE_IN_POST_REWRITE`; lock timeout prints one line and exits 0 without writing.
+- I126 (Q3). Two amend tests encoded the old "stale link survives until manual relink" behaviour and now assert the relinked outcome.
+- I127 (Q3). Finding, not fixed: post-commit already fires per replayed commit during a non-conflicting rebase in this git version, which can leave backlink edits that conflict with a same-range commit touching docs/decisions; pre-existing, out of Q3 scope, candidate for a record.

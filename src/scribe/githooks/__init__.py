@@ -24,6 +24,7 @@ HOOK_MODULES = {
     "prepare-commit-msg": "scribe.githooks.prepare_commit_msg",
     "commit-msg": "scribe.githooks.commit_msg",
     "post-commit": "scribe.githooks.post_commit",
+    "post-rewrite": "scribe.githooks.post_rewrite",
 }
 SKIP_ENV = "SCRIBE_SKIP_HOOKS"
 

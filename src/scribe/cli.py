@@ -144,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     hook_parser.add_argument("event", help="hook event name from hooks/hooks.json")
     git_hook_parser = subparsers.add_parser(
         "git-hook",
-        help="run a git hook entrypoint (prepare-commit-msg, commit-msg, post-commit)",
+        help="run a git hook entrypoint (prepare-commit-msg, commit-msg, post-commit, post-rewrite)",
     )
     git_hook_parser.add_argument("name", help="git hook name")
     git_hook_parser.add_argument(
