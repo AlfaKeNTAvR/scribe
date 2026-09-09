@@ -329,6 +329,12 @@ def follow_ups(root: Path, report: Report) -> list[str]:
             "  - add branch protection on the default branch requiring the "
             "scribe-check job"
         )
+    lines.append(
+        f"  - start Claude Code sessions at the repository root ({root}): the "
+        "RATIFICATIONS.jsonl deny rule in .claude/settings.json does not load "
+        "for a session started in a subdirectory; for those sessions add "
+        "Edit(**/docs/decisions/RATIFICATIONS.jsonl) to your user settings"
+    )
     return lines
 
 

@@ -53,3 +53,7 @@ fix: Harden gate state, denial supervision and ratified authority
 
 Read pending decisions from the returned locked state, keep denylist scans within command boundaries, and token denial markers per invocation so a crash can no longer impersonate a block. Share one attestation-backed `effective_authority` predicate across the Bash/PowerShell gate, INDEX.md and commit-msg, and stop clearing an enforce-mode decision-worthy flag until a record actually lands.
 ```
+
+## Item 5 (V21)
+
+Done by a Sonnet worktree agent; full section, tests and I-lines (folded in as I102 to I106) in `09-batch-b-item-5.md`. Suite in that worktree: 392 passed, 3 skipped on base a4a721a.

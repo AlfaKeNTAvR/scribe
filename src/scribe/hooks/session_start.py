@@ -6,10 +6,11 @@ Stdin fields read: `session_id`, `cwd` (plan 4.1 item 3). Output shape:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from scribe.frontmatter import split
-from scribe.hooks.launcher import repo_root, store_for
+from scribe.hooks.launcher import payload_cwd, repo_root, store_for
 from scribe.state import log_hook_error, session_entry, update_state
 from scribe.store import Store
 
@@ -27,6 +28,24 @@ def load_front_matters(store: Store) -> list[dict[str, Any]]:
             continue
         mappings.append(mapping)
     return mappings
+
+
+def subdirectory_hint(cwd: Path, root: Path) -> str | None:
+    """V21: the RATIFICATIONS.jsonl deny rule only loads for a root-started session.
+
+    Live testing showed no project settings (`.claude/settings.json` or
+    `settings.local.json`, whatever the rule's path form) load when Claude
+    Code starts below the repository root, so the deny rule is silently
+    inactive there. This is advisory only: it cannot make the rule load.
+    """
+    if cwd == root:
+        return None
+    return (
+        f"scribe: session started below the repository root ({root}); the "
+        "RATIFICATIONS.jsonl deny rule from .claude/settings.json is not "
+        f"active here; start Claude at {root} or add "
+        "Edit(**/docs/decisions/RATIFICATIONS.jsonl) to your user settings"
+    )
 
 
 def review_queue_counts(mappings: list[dict[str, Any]]) -> tuple[int, int]:
@@ -51,16 +70,21 @@ def handle(payload: dict[str, Any]) -> dict[str, Any] | None:
     session_id = payload.get("session_id")
     if isinstance(session_id, str) and session_id:
         update_state(root, lambda state: session_entry(state, session_id))
+    lines = []
+    hint = subdirectory_hint(payload_cwd(payload), root)
+    if hint is not None:
+        lines.append(hint)
     unreviewed, superseding = review_queue_counts(load_front_matters(store))
-    if unreviewed == 0:
+    if unreviewed > 0:
+        lines.append(
+            f"scribe: {unreviewed} unreviewed decisions, {superseding} supersede a "
+            "ratified one. Run /scribe:lint or open docs/decisions/INDEX.md."
+        )
+    if not lines:
         return None
-    message = (
-        f"scribe: {unreviewed} unreviewed decisions, {superseding} supersede a "
-        "ratified one. Run /scribe:lint or open docs/decisions/INDEX.md."
-    )
     return {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": message,
+            "additionalContext": "\n".join(lines),
         }
     }

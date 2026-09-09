@@ -152,6 +152,42 @@ def test_session_start_outside_git_is_silent(run_hook: RunHook, tmp_path: Path) 
     assert not (tmp_path / ".claude").exists()
 
 
+def test_session_start_hints_when_started_below_repo_root(
+    run_hook: RunHook, tmp_repo: Path
+) -> None:
+    """V21: the RATIFICATIONS.jsonl deny rule does not load below the repo root."""
+    subdir = tmp_repo / "sub"
+    subdir.mkdir()
+    result = run_hook(
+        "session-start", load_fixture("session_start.json", subdir), subdir
+    )
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert f"session started below the repository root ({tmp_repo})" in context
+    assert (
+        "RATIFICATIONS.jsonl deny rule from .claude/settings.json is not active here"
+    ) in context
+    assert f"start Claude at {tmp_repo}" in context
+    assert (
+        "Edit(**/docs/decisions/RATIFICATIONS.jsonl) to your user settings" in context
+    )
+
+
+def test_session_start_root_cwd_has_no_subdirectory_hint(
+    run_hook: RunHook, tmp_repo: Path
+) -> None:
+    store = tmp_repo / "docs" / "decisions"
+    make_unreviewed_copy(store, "D-260909-plain", "01M21BV91NZSW1HMJ127KZAA5M", None)
+    result = run_hook(
+        "session-start", load_fixture("session_start.json", tmp_repo), tmp_repo
+    )
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "session started below" not in context
+
+
 def test_session_start_without_session_id_only_reports(
     run_hook: RunHook, tmp_repo: Path
 ) -> None:

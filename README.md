@@ -86,12 +86,21 @@ record alone cannot ratify it.
 What this file is and is not: `scribe init` adds
 `Edit(/docs/decisions/RATIFICATIONS.jsonl)` to `permissions.deny` in the
 target repo's `.claude/settings.json`; the leading `/` anchors at the
-settings source (the repository root) and an `Edit` rule also covers the
-`Write` tool (Claude Code 2.1.228 or later; `Write(...)` path rules are
-accepted but never consulted, so none is written). This blocks the agent's
-file tools. It does not block a subprocess: an agent could run `scribe
-ratify` through Bash. In this release, human-only ratification is by
-construction of the skills (`/scribe:ratify` and `/scribe:reject` carry
+session's primary working directory, not the repository root, and an `Edit`
+rule also covers the `Write` tool (Claude Code 2.1.228 or later; `Write(...)`
+path rules are accepted but never consulted, so none is written). This blocks
+the agent's file tools, but only for a session started at the repository
+root: live testing showed that no project settings (`.claude/settings.json`
+or `settings.local.json`, whatever path form the rule uses, `/relative`,
+`**/any-depth`, or `//absolute`) load when Claude Code starts in a
+subdirectory of the repository, so the deny rule is silently inactive for
+those sessions. `scribe init` and the SessionStart hook both print a
+reminder to start Claude at the repository root; for a session that must
+start below it, add `Edit(**/docs/decisions/RATIFICATIONS.jsonl)` to your own
+user-level settings instead, since a user-level rule is not anchored to the
+project's settings source. None of this blocks a subprocess: an agent could
+run `scribe ratify` through Bash. In this release, human-only ratification is
+by construction of the skills (`/scribe:ratify` and `/scribe:reject` carry
 `disable-model-invocation: true`), not by proof; the attestation line records
 who ran the verdict and through which path (`via`).
 

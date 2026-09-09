@@ -33,7 +33,13 @@ def test_ci_source_filesystem_path_is_one_shell_argument(tmp_path: Path) -> None
     source.mkdir()
     command, warning = check_command(str(source))
     assert shlex.split(command) == [
-        "uv", "run", "--frozen", "--project", str(source), "scribe", "check"
+        "uv",
+        "run",
+        "--frozen",
+        "--project",
+        str(source),
+        "scribe",
+        "check",
     ]
     assert warning is not None
 
@@ -264,6 +270,22 @@ def test_without_ci_source_no_workflow_is_written_and_the_hint_is_printed(
     assert NO_CI_HINT.startswith(
         "scribe: no CI workflow written; re-run with --ci-source"
     )
+
+
+def test_init_next_steps_hint_the_subdirectory_start_limitation(
+    run_cli: RunCli, tmp_repo: Path
+) -> None:
+    """V21: scribe init reminds the user where the deny rule actually loads."""
+    code, stdout = init(run_cli, tmp_repo)
+
+    assert code == 0
+    assert "scribe init: next steps" in stdout
+    assert f"start Claude Code sessions at the repository root ({tmp_repo})" in stdout
+    assert (
+        "RATIFICATIONS.jsonl deny rule in .claude/settings.json does not load "
+        "for a session started in a subdirectory"
+    ) in stdout
+    assert "Edit(**/docs/decisions/RATIFICATIONS.jsonl) to your user settings" in stdout
 
 
 def test_second_run_is_unchanged_everywhere(run_cli: RunCli, tmp_repo: Path) -> None:
