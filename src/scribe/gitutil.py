@@ -4,6 +4,22 @@ import subprocess
 from pathlib import Path
 
 
+class GitError(RuntimeError):
+    """A `strict=True` git helper's underlying command failed (V3(b)).
+
+    Every message reads `git failed while computing <what>: <stderr first
+    line>`, so a caller that wants one explicit reason line can just
+    `str(exc)` it.
+    """
+
+    def __init__(self, what: str, result: subprocess.CompletedProcess[str]) -> None:
+        lines = (result.stderr or "").strip().splitlines()
+        detail = lines[0] if lines else f"git exited {result.returncode}"
+        self.what = what
+        self.detail = detail
+        super().__init__(f"git failed while computing {what}: {detail}")
+
+
 def _git(cwd: str | Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(cwd), *args],
@@ -38,9 +54,17 @@ def staged_paths(cwd: str | Path = ".") -> list[str]:
     return _paths_from_z(result)
 
 
-def is_dirty(pathspec: str, cwd: str | Path = ".") -> bool:
-    """True when `git status --porcelain -- <pathspec>` reports anything at all."""
+def is_dirty(pathspec: str, cwd: str | Path = ".", *, strict: bool = False) -> bool:
+    """True when `git status --porcelain -- <pathspec>` reports anything at all.
+
+    A failed `git status` has empty stdout, so the tolerant form reads it as
+    "clean" (V3(b), Codex review addendum): `strict=True` raises `GitError`
+    instead, for a caller (`scribe check`) that must not treat "git itself
+    failed" as "the ledger is clean" and proceed.
+    """
     result = _git(cwd, "status", "--porcelain", "--", pathspec)
+    if strict and result.returncode != 0:
+        raise GitError(f"the status of {pathspec}", result)
     return bool(result.stdout.strip())
 
 
@@ -219,25 +243,52 @@ def commit_changed_paths(rev: str = "HEAD", cwd: str | Path = ".") -> list[str]:
     return _paths_from_z(result)
 
 
-def merge_base(first: str, second: str = "HEAD", cwd: str | Path = ".") -> str | None:
-    """The commit where `second` forked from `first`, the base of `first...second`."""
+def merge_base(
+    first: str, second: str = "HEAD", cwd: str | Path = ".", *, strict: bool = False
+) -> str | None:
+    """The commit where `second` forked from `first`, the base of `first...second`.
+
+    `strict=True` raises `GitError` instead of returning `None` on failure, for
+    a caller (`scribe check`) that must not fall back to `first` when the merge
+    base itself cannot be computed (V3(b)): a bad ref, a missing object, or a
+    broken repository must fail the check, not pass it vacuously.
+    """
     result = _git(cwd, "merge-base", first, second)
     if result.returncode != 0:
+        if strict:
+            raise GitError(f"the merge base of {first} and {second}", result)
         return None
     sha = result.stdout.strip()
     return sha or None
 
 
-def diff_names(base: str, head: str = "HEAD", cwd: str | Path = ".") -> list[str]:
-    """Repository-relative paths changed by `base...head`."""
+def diff_names(
+    base: str, head: str = "HEAD", cwd: str | Path = ".", *, strict: bool = False
+) -> list[str]:
+    """Repository-relative paths changed by `base...head`.
+
+    `strict=True` raises `GitError` instead of returning `[]` on failure (see
+    `merge_base`'s docstring); the git hooks keep calling this tolerant, so
+    their fail-open behaviour is unchanged.
+    """
     result = _git(cwd, "diff", "--name-only", "-z", f"{base}...{head}")
+    if strict and result.returncode != 0:
+        raise GitError(f"the changed paths between {base} and {head}", result)
     return _paths_from_z(result)
 
 
-def rev_list_range(base: str, head: str = "HEAD", cwd: str | Path = ".") -> list[str]:
-    """Commits in `base..head`, newest first."""
+def rev_list_range(
+    base: str, head: str = "HEAD", cwd: str | Path = ".", *, strict: bool = False
+) -> list[str]:
+    """Commits in `base..head`, newest first.
+
+    `strict=True` raises `GitError` instead of returning `[]` on failure (see
+    `merge_base`'s docstring).
+    """
     result = _git(cwd, "rev-list", f"{base}..{head}")
     if result.returncode != 0:
+        if strict:
+            raise GitError(f"the commit range {base}..{head}", result)
         return []
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
@@ -254,9 +305,19 @@ def tree_record_paths(
     rev: str,
     subdir: str = "docs/decisions",
     cwd: str | Path = ".",
+    *,
+    strict: bool = False,
 ) -> list[str]:
-    """Decision record paths present at `rev` under `subdir`."""
+    """Decision record paths present at `rev` under `subdir`.
+
+    `strict=True` raises `GitError` instead of returning `[]` on failure (see
+    `merge_base`'s docstring): `scribe lint` and `history_check` keep calling
+    this tolerant, so an unrelated caller never sees a `[]` that meant
+    "git failed" masquerading as "no records here".
+    """
     result = _git(cwd, "ls-tree", "-r", "--name-only", "-z", rev, "--", subdir)
+    if strict and result.returncode != 0:
+        raise GitError(f"the decision record paths at {rev}", result)
     paths = _paths_from_z(result)
     return [
         path

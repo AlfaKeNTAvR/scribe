@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from scribe.gitutil import commit_changed_paths, diff_names, staged_paths
+from scribe.gitutil import GitError, commit_changed_paths, diff_names, staged_paths
 
 CAFE = "src/café.py"
 TAB = "src/tab\tfile.py"
@@ -92,3 +92,32 @@ def test_commit_changed_paths_preserves_special_filenames_on_root_commit(
     git(repo, "commit", "-q", "-m", "root commit with special names")
 
     assert set(commit_changed_paths("HEAD", repo)) == set(SPECIAL_NAMES)
+
+
+# --- V3(b): the strict/tolerant split on git failure -------------------------
+
+
+def test_diff_names_tolerant_form_still_returns_empty_list_on_git_failure(
+    repo: Path,
+) -> None:
+    """The default form fails open (V3(b)): the git hooks and `scribe lint`
+    call this without `strict` and must keep treating a git failure as "no
+    paths", not raise.
+    """
+    _write_all(repo, "one\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "seed commit")
+
+    assert diff_names("not-a-real-ref", "HEAD", repo) == []
+
+
+def test_diff_names_strict_form_raises_on_git_failure(repo: Path) -> None:
+    """`strict=True` is `scribe check`'s form: a git failure is an exception,
+    not an empty (and indistinguishable from "no changes") list.
+    """
+    _write_all(repo, "one\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "seed commit")
+
+    with pytest.raises(GitError, match="git failed while computing"):
+        diff_names("not-a-real-ref", "HEAD", repo, strict=True)

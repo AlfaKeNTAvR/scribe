@@ -421,3 +421,130 @@ def test_an_unknown_base_ref_exits_one(run_cli: RunCli, ledger: Path) -> None:
 
     assert code == 1
     assert stdout.strip() == "unknown base ref: no-such-ref"
+
+
+# --- V3(b): git failures must never pass vacuously --------------------------
+
+
+def _fake_git_that_fails_one_subcommand(
+    module: object, subcommand: str, stderr: str
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """A `gitutil._git` replacement that fails only `git <subcommand> ...`.
+
+    Every other subcommand is delegated to the real `_git`, so the rest of
+    `scribe check` runs against the real repository, exactly as it would when
+    only one git call in the range computation hits a bad ref or a missing
+    object.
+    """
+    original = module._git
+
+    def fake(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        if args[:1] == (subcommand,):
+            return subprocess.CompletedProcess(
+                args=["git", *args], returncode=128, stdout="", stderr=stderr
+            )
+        return original(cwd, *args)
+
+    return fake
+
+
+def test_a_git_failure_computing_the_range_fails_the_check(
+    run_cli: RunCli,
+    ledger: Path,
+    successor_branch: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """(a): a git failure while computing the range is an explicit check
+    failure, not a vacuous pass.
+
+    Fails on the old code: `diff_names` returned `[]` on a git error, so
+    `changed_paths` was empty; `_supersede_gate` (rule 1) then saw no changed
+    path, no depended-on path, and no trailer, and the unreviewed successor
+    from `successor_branch` (which would otherwise fail this check, see
+    `test_unreviewed_successor_of_a_ratified_record_fails`) passed with
+    `scribe check: ok`.
+    """
+    import scribe.gitutil as gitutil_module
+
+    monkeypatch.setattr(
+        gitutil_module,
+        "_git",
+        _fake_git_that_fails_one_subcommand(
+            gitutil_module, "diff", "fatal: bad object deadbeef\n"
+        ),
+    )
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert stdout.strip() == (
+        "git failed while computing the changed paths between "
+        f"{git(ledger, 'merge-base', 'main', 'HEAD')} and HEAD: "
+        "fatal: bad object deadbeef"
+    )
+
+
+def test_a_merge_base_failure_fails_the_check_instead_of_falling_back_to_base(
+    run_cli: RunCli,
+    ledger: Path,
+    successor_branch: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """(b): a `merge_base` failure must fail the check, not silently fall back
+    to `base` (check.py:192 before the fix).
+
+    Fails on the old code: `gitutil.merge_base(base, "HEAD", root) or base`
+    substituted `base` itself for the fork point, so `diff_names(base, "HEAD")`
+    and `rev_list_range(base, "HEAD")` still computed a real (if wrong) range
+    and the unreviewed successor from `successor_branch` still failed the
+    check for the wrong reason; the merge-base failure itself was silent. This
+    test's fake makes `merge-base` fail with a real git error, and asserts the
+    check reports it rather than reaching rule 1 at all.
+    """
+    import scribe.gitutil as gitutil_module
+
+    monkeypatch.setattr(
+        gitutil_module,
+        "_git",
+        _fake_git_that_fails_one_subcommand(
+            gitutil_module, "merge-base", "fatal: not a valid object name\n"
+        ),
+    )
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert stdout.strip() == (
+        "git failed while computing the merge base of main and HEAD: "
+        "fatal: not a valid object name"
+    )
+
+
+def test_a_dirty_check_failure_fails_the_check_instead_of_reading_clean(
+    run_cli: RunCli, ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed `git status` must not be read as "the ledger is clean".
+
+    Fails on the old code: `is_dirty` returned `bool(result.stdout.strip())`
+    unconditionally, and a failed `git status` has empty stdout, so
+    `run_check` read the failure as "not dirty" and went on to `scribe check:
+    ok` even though it never actually knew whether `docs/decisions` was
+    clean.
+    """
+    import scribe.gitutil as gitutil_module
+
+    monkeypatch.setattr(
+        gitutil_module,
+        "_git",
+        _fake_git_that_fails_one_subcommand(
+            gitutil_module, "status", "fatal: index file corrupt\n"
+        ),
+    )
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert stdout.strip() == (
+        "git failed while computing the status of docs/decisions: "
+        "fatal: index file corrupt"
+    )

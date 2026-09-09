@@ -160,16 +160,18 @@ def _alias_at(root: Path, rev: str, path: str) -> str:
     return Path(path).stem
 
 
-def _deleted_record_reasons(store: Store, base: str) -> list[str]:
+def _deleted_record_reasons(
+    root: Path, base: str, base_paths: set[str], head_paths: set[str]
+) -> list[str]:
     """Rule 6: a record present at the base and gone at the tip must not merge (V6).
 
     Retirement goes through `expired` or `backtracked`; deleting the file
     bypasses the ledger's immutability, so the owner's call is that this
-    always fails, with no `--allow-delete` escape (supersedes I45).
+    always fails, with no `--allow-delete` escape (supersedes I45). The path
+    sets are precomputed by the caller with the strict form of
+    `tree_record_paths` (V3(b)): a git failure while listing either tree must
+    fail the check, not be read as "no records here".
     """
-    root = store.root
-    base_paths = set(gitutil.tree_record_paths(base, DECISIONS_DIR, root))
-    head_paths = set(gitutil.tree_record_paths("HEAD", DECISIONS_DIR, root))
     return [
         f"{path}: record_deleted: {_alias_at(root, base, path)} was present at "
         f"{base} and is missing at HEAD; retire it with expired or backtracked "
@@ -187,11 +189,26 @@ def check_range(store: Store, base: str) -> list[str]:
     the supersede gate is the one exception (V3): it is asked against `base`
     itself, the target ref's current tip, so a ratification landed there
     after the fork is honoured rather than lost.
+
+    Every git call that builds the range uses the strict form (V3(b)): a bad
+    ref, a missing object, or a broken repository raises `gitutil.GitError`
+    instead of silently emptying the range, and is turned here into one
+    explicit reason the check fails, rather than letting the historical rules
+    below see an empty range and pass vacuously.
     """
     root = store.root
-    fork_point = gitutil.merge_base(base, "HEAD", root) or base
-    changed_paths = gitutil.diff_names(fork_point, "HEAD", root)
-    commits = gitutil.rev_list_range(fork_point, "HEAD", root)
+    try:
+        fork_point = gitutil.merge_base(base, "HEAD", root, strict=True)
+        changed_paths = gitutil.diff_names(fork_point, "HEAD", root, strict=True)
+        commits = gitutil.rev_list_range(fork_point, "HEAD", root, strict=True)
+        base_record_paths = set(
+            gitutil.tree_record_paths(fork_point, DECISIONS_DIR, root, strict=True)
+        )
+        head_record_paths = set(
+            gitutil.tree_record_paths("HEAD", DECISIONS_DIR, root, strict=True)
+        )
+    except gitutil.GitError as exc:
+        return [str(exc)]
 
     reasons = _supersede_gate(store, base, changed_paths, commits)
     reasons.extend(_validate_all_records(store))
@@ -203,9 +220,13 @@ def check_range(store: Store, base: str) -> list[str]:
     )
     reasons.extend(
         f"{path}: {problem.code}: {problem.message}"
-        for path, problem in check_records_against_base(fork_point, root)
+        for path, problem in check_records_against_base(
+            fork_point, root, paths=sorted(base_record_paths)
+        )
     )
-    reasons.extend(_deleted_record_reasons(store, fork_point))
+    reasons.extend(
+        _deleted_record_reasons(root, fork_point, base_record_paths, head_record_paths)
+    )
     return reasons
 
 
@@ -218,16 +239,24 @@ def run_check(
     reads records, attestations and the index off disk, so an uncommitted
     change under `docs/decisions` could mask or fake a result the committed
     range does not actually contain. `--allow-dirty` (surfaced by the caller)
-    skips the guard for a caller that knows what it is doing.
+    skips the guard for a caller that knows what it is doing. The dirtiness
+    probe itself uses the strict form (V3(b), Codex review addendum): a
+    failed `git status` has empty stdout, so the tolerant form reads it as
+    "clean", and this check must not proceed on that misreading.
     """
     store = Store.discover(start)
     if store is None or not store.path.is_dir():
         return 1, ["no decision store found (docs/decisions)"]
-    if not allow_dirty and gitutil.is_dirty(DECISIONS_DIR, store.root):
-        return 1, [
-            f"{DECISIONS_DIR} has uncommitted changes; commit them or re-run "
-            "with --allow-dirty"
-        ]
+    if not allow_dirty:
+        try:
+            dirty = gitutil.is_dirty(DECISIONS_DIR, store.root, strict=True)
+        except gitutil.GitError as exc:
+            return 1, [str(exc)]
+        if dirty:
+            return 1, [
+                f"{DECISIONS_DIR} has uncommitted changes; commit them or re-run "
+                "with --allow-dirty"
+            ]
     if gitutil.rev_parse_commit(base, store.root) is None:
         return 1, [f"unknown base ref: {base}"]
     reasons = check_range(store, base)
