@@ -26,6 +26,7 @@ affects:
 implementation_links:
 - {commit: e87e31b6c3cf, paths: &id001 [skills/decide/SKILL.md]}
 - {commit: ae40787ad91c, paths: &id002 [src/scribe/hooks/pre_tool_use_gate.py, src/scribe/policy.py]}
+- {commit: ed6a758732d6, paths: &id005 [skills/decide/SKILL.md]}
 tags:
 - one-way-door
 - autonomous-mode
@@ -46,8 +47,9 @@ history:
 - {at: '2026-09-08T20:37:42Z', event: ratified, by: '@nikita', field: review_state, old: unreviewed, new: ratified}
 - {at: '2026-09-08T20:37:42Z', event: ratified, by: '@nikita', field: ratified_by, old: null, new: '@nikita'}
 - {at: '2026-09-08T20:37:42Z', event: ratified, by: '@nikita', field: ratified_at, old: null, new: '2026-09-08T20:37:42Z'}
-- {at: '2026-09-09T01:26:46Z', event: relinked, by: scribe-relink, field: implementation_links, old: [], new: [{commit: e87e31b6c3cf, paths: *id001}, {commit: ae40787ad91c, paths: *id002}]}
+- {at: '2026-09-09T01:26:46Z', event: relinked, by: scribe-relink, field: implementation_links, old: [], new: [{commit: e87e31b6c3cf, paths: [skills/decide/SKILL.md]}, {commit: ae40787ad91c, paths: [src/scribe/hooks/pre_tool_use_gate.py, src/scribe/policy.py]}]}
 - {at: '2026-09-09T01:26:46Z', event: implemented, by: scribe-relink, commit: ae40787ad91c, field: effective_state, old: proposed, new: implemented}
+- {at: '2026-09-09T01:39:07Z', event: link_added, by: scribe-post-commit, commit: ed6a758732d6, field: implementation_links, old: [&id003 {commit: e87e31b6c3cf, paths: *id001}, &id004 {commit: ae40787ad91c, paths: *id002}], new: [*id003, *id004, {commit: ed6a758732d6, paths: *id005}]}
 ---
 
 # One-way-door decisions are recorded as proposed and batched for the end of the run, never a hard stop, and the Bash denylist keeps the action denied until ratified

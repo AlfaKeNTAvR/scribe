@@ -26,6 +26,7 @@ affects:
 implementation_links:
 - {commit: e7c2684a3173, paths: &id001 [src/scribe/schema.py]}
 - {commit: e87e31b6c3cf, paths: &id002 [skills/decide/SKILL.md, src/scribe/templates/record_template.md]}
+- {commit: ed6a758732d6, paths: &id005 [skills/decide/SKILL.md]}
 tags:
 - schema
 - evidence
@@ -45,8 +46,9 @@ history:
 - {at: '2026-09-08T20:37:43Z', event: ratified, by: '@nikita', field: review_state, old: unreviewed, new: ratified}
 - {at: '2026-09-08T20:37:43Z', event: ratified, by: '@nikita', field: ratified_by, old: null, new: '@nikita'}
 - {at: '2026-09-08T20:37:43Z', event: ratified, by: '@nikita', field: ratified_at, old: null, new: '2026-09-08T20:37:43Z'}
-- {at: '2026-09-09T01:26:46Z', event: relinked, by: scribe-relink, field: implementation_links, old: [], new: [{commit: e7c2684a3173, paths: *id001}, {commit: e87e31b6c3cf, paths: *id002}]}
+- {at: '2026-09-09T01:26:46Z', event: relinked, by: scribe-relink, field: implementation_links, old: [], new: [{commit: e7c2684a3173, paths: [src/scribe/schema.py]}, {commit: e87e31b6c3cf, paths: [skills/decide/SKILL.md, src/scribe/templates/record_template.md]}]}
 - {at: '2026-09-09T01:26:46Z', event: implemented, by: scribe-relink, commit: e87e31b6c3cf, field: effective_state, old: proposed, new: implemented}
+- {at: '2026-09-09T01:39:07Z', event: link_added, by: scribe-post-commit, commit: ed6a758732d6, field: implementation_links, old: [&id003 {commit: e7c2684a3173, paths: *id001}, &id004 {commit: e87e31b6c3cf, paths: *id002}], new: [*id003, *id004, {commit: ed6a758732d6, paths: *id005}]}
 ---
 
 # The Evidence section quotes the decisive user turn verbatim; transcript pointers are kept but never relied on
