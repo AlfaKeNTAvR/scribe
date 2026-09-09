@@ -122,3 +122,114 @@ def log_grep_all(
         if separator:
             commits.append((sha, subject))
     return commits
+
+
+# --- git hook helpers (plan 5.1 to 5.3) -------------------------------------
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def staged_paths_against(base: str, cwd: str | Path = ".") -> list[str]:
+    """Staged paths relative to `base` (a commit or the empty tree), POSIX form.
+
+    `prepare-commit-msg` uses this on amend: the index is compared with the
+    amended commit's parent so the pending filter sees the whole amended
+    content, not only what was staged since the original commit (F14).
+    """
+    result = _git(cwd, "diff", "--cached", "--name-only", "--diff-filter=ACMR", base)
+    if result.returncode != 0:
+        return []
+    return [line.replace("\\", "/") for line in result.stdout.splitlines() if line]
+
+
+def parent_or_empty_tree(rev: str, cwd: str | Path = ".") -> str:
+    """`<rev>^` when it exists, else the empty tree (rev is a root commit)."""
+    parent = rev_parse_commit(f"{rev}^", cwd)
+    return parent if parent is not None else EMPTY_TREE
+
+
+def add_trailer_to_file(
+    message_file: str | Path,
+    key: str,
+    value: str,
+    cwd: str | Path = ".",
+) -> bool:
+    """`git interpret-trailers --in-place --if-exists addIfDifferent` on the file."""
+    result = _git(
+        cwd,
+        "interpret-trailers",
+        "--in-place",
+        "--if-exists",
+        "addIfDifferent",
+        "--trailer",
+        f"{key}: {value}",
+        str(message_file),
+    )
+    return result.returncode == 0
+
+
+def head_sha(cwd: str | Path = ".") -> str | None:
+    return rev_parse_commit("HEAD", cwd)
+
+
+def commit_changed_paths(rev: str = "HEAD", cwd: str | Path = ".") -> list[str]:
+    """Paths a commit touched; a root commit falls back to `git show --name-only`."""
+    if rev_parse_commit(f"{rev}^", cwd) is None:
+        result = _git(cwd, "show", "--name-only", "--format=", rev)
+    else:
+        result = _git(cwd, "diff-tree", "--no-commit-id", "--name-only", "-r", rev)
+    if result.returncode != 0:
+        return []
+    return [
+        line.replace("\\", "/") for line in result.stdout.splitlines() if line.strip()
+    ]
+
+
+def merge_base(first: str, second: str = "HEAD", cwd: str | Path = ".") -> str | None:
+    """The commit where `second` forked from `first`, the base of `first...second`."""
+    result = _git(cwd, "merge-base", first, second)
+    if result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
+def diff_names(base: str, head: str = "HEAD", cwd: str | Path = ".") -> list[str]:
+    """Repository-relative paths changed by `base...head`, forward slashes."""
+    result = _git(cwd, "diff", "--name-only", f"{base}...{head}")
+    if result.returncode != 0:
+        return []
+    return [line.replace("\\", "/") for line in result.stdout.splitlines() if line]
+
+
+def rev_list_range(base: str, head: str = "HEAD", cwd: str | Path = ".") -> list[str]:
+    """Commits in `base..head`, newest first."""
+    result = _git(cwd, "rev-list", f"{base}..{head}")
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def show_blob(rev: str, path: str, cwd: str | Path = ".") -> str | None:
+    """The text of one file at one revision, or None when it is not there."""
+    result = _git(cwd, "show", f"{rev}:{path}")
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def tree_record_paths(
+    rev: str,
+    subdir: str = "docs/decisions",
+    cwd: str | Path = ".",
+) -> list[str]:
+    """Decision record paths present at `rev` under `subdir`."""
+    result = _git(cwd, "ls-tree", "-r", "--name-only", rev, "--", subdir)
+    if result.returncode != 0:
+        return []
+    paths = [line.replace("\\", "/") for line in result.stdout.splitlines() if line]
+    return [
+        path
+        for path in paths
+        if path.endswith(".md") and path.rsplit("/", 1)[-1].startswith("D-")
+    ]

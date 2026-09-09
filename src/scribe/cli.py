@@ -81,11 +81,28 @@ def build_parser() -> argparse.ArgumentParser:
             default="cli",
             help="path the verdict came through (default cli)",
         )
+    check_parser = subparsers.add_parser(
+        "check",
+        help="CI merge gate over a commit range (plan 5.4)",
+    )
+    check_parser.add_argument(
+        "--base",
+        required=True,
+        help="the ref this branch is merging into, for example origin/main",
+    )
     hook_parser = subparsers.add_parser(
         "hook",
         help="run a Claude Code hook handler with the JSON payload on stdin",
     )
     hook_parser.add_argument("event", help="hook event name from hooks/hooks.json")
+    git_hook_parser = subparsers.add_parser(
+        "git-hook",
+        help="run a git hook entrypoint (prepare-commit-msg, commit-msg, post-commit)",
+    )
+    git_hook_parser.add_argument("name", help="git hook name")
+    git_hook_parser.add_argument(
+        "hook_args", nargs=argparse.REMAINDER, help="arguments git passed to the hook"
+    )
     return parser
 
 
@@ -245,11 +262,24 @@ def _verdict_command(args: argparse.Namespace) -> int:
     return outcome.code
 
 
+def _check_command(args: argparse.Namespace) -> int:
+    from scribe.check import run_check
+
+    code, lines = run_check(args.base)
+    for line in lines:
+        print(line)
+    return code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "validate":
         return _validate_command(args)
+    if args.command == "git-hook":
+        from scribe.githooks import dispatch as dispatch_git_hook
+
+        return dispatch_git_hook(args.name, args.hook_args)
     if args.command == "index":
         return _index_command(args)
     if args.command == "lookup":
@@ -258,6 +288,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _new_command(args)
     if args.command in ("ratify", "reject"):
         return _verdict_command(args)
+    if args.command == "check":
+        return _check_command(args)
     if args.command == "hook":
         from scribe.hooks.launcher import dispatch
 
