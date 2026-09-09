@@ -172,8 +172,13 @@ default:
   is passed through: the supervisor gives that invocation a random token and
   accepts only the matching `[scribe-deny <token>]` stderr line, then forces
   the documented blocking exit code. Registered hooks use `python3 -I -S`;
-  installed git shims re-exec themselves with those flags before loading the
-  supervisor.
+  installed git shims start already isolated on POSIX via the `env -S
+  python3 -I -S` shebang `scribe init` writes (see the Windows caveats
+  section below), so a broken `PYTHONHOME` or `PYTHONPATH` cannot crash the
+  interpreter before isolation takes effect. The shim's in-script re-exec
+  under those same flags stays in place as a fallback for a Windows shim
+  (which still starts unisolated) and for any POSIX `env` too old to
+  support `-S`.
 
 ## Config file
 
@@ -196,14 +201,24 @@ exec-form hooks, no bash), not tested against a real Windows machine in this
 release:
 
 - **Shim and hook interpreter**: the git hook shims `scribe init` writes use
-  `#!/usr/bin/env python3` on POSIX and `#!/usr/bin/env python` on Windows
-  (`os.name == "nt"` at init time); both import `hooks/supervise.py` from the
-  plugin root and wait for uv through `subprocess.run`, so nothing depends on
-  `execvp`. `scribe init` refuses to install anything if `uv` or the shim
-  interpreter is not on PATH. The Claude Code hooks in `hooks/hooks.json`
-  are registered as `python3 -I -S <plugin>/hooks/supervise.py ...`; a Windows
-  machine whose interpreter is only reachable as `python` needs that command
-  name changed, which has not been tried.
+  `#!/usr/bin/env -S python3 -I -S` on POSIX and `#!/usr/bin/env python` on
+  Windows (`os.name == "nt"` at init time); both import `hooks/supervise.py`
+  from the plugin root and wait for uv through `subprocess.run`, so nothing
+  depends on `execvp`. `scribe init` refuses to install anything if `uv` or
+  the shim interpreter is not on PATH. The Claude Code hooks in
+  `hooks/hooks.json` are registered as `python3 -I -S
+  <plugin>/hooks/supervise.py ...`; a Windows machine whose interpreter is
+  only reachable as `python` needs that command name changed, which has not
+  been tried. The POSIX shebang's `-S` (split the rest of the line into
+  separate `env` arguments) needs GNU coreutils `env` 8.30+ (2018), the
+  `env` shipped with macOS since at least 10.15, or MSYS2's `env`; an older
+  `env` without `-S` support does not degrade gracefully; the kernel hands
+  it the whole `-S python3 -I -S` as a single argument, and that `env` tries
+  and fails to run a program literally named that. The Windows shebang has
+  no `-S` and instead relies entirely on the shim's in-script re-exec
+  (`githook_shim.py`) to reach `-I -S` isolation one process later; on
+  POSIX that re-exec is now a fallback only, since the shebang already
+  isolates the first process.
 - **Lock adapter untested**: the scratch-state file lock
   (`src/scribe/state.py`) uses `fcntl.flock` on POSIX and `msvcrt.locking` on
   Windows. The Windows branch is exercised only against a faked `msvcrt`

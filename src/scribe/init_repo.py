@@ -68,10 +68,38 @@ def shim_interpreter(platform: str = os.name) -> str:
     return "python" if platform == "nt" else "python3"
 
 
+def shim_shebang(platform: str = os.name) -> str:
+    """The shim's shebang argument: the interpreter, isolated from the start on POSIX.
+
+    `env -S python3 -I -S` makes the very first interpreter start ignore
+    `PYTHONHOME`, `PYTHONPATH` and site customization, instead of only the
+    in-script re-exec (`githook_shim.py`) reaching that isolation a process
+    later. Without this, a broken `PYTHONHOME` can crash Python before the
+    re-exec's own code ever runs, blocking a commit (Codex review, plan
+    docs/build/08-codex-review-batch-a.md "New defects", "The installed
+    shim lacks equivalent isolation").
+
+    `-S` (splits the rest of the shebang line into separate `env`
+    arguments instead of one) is supported by GNU coreutils `env` 8.30+
+    (2018), the `env` shipped with macOS since at least 10.15, and MSYS2's
+    `env`. An `env` without `-S` support does not degrade gracefully: the
+    kernel hands it the whole "-S python3 -I -S" as one argument (shebang
+    "optional-arg" is never split by the kernel itself), and that `env`
+    tries and fails to run a program literally named "-S python3 -I -S".
+    There is no way to recover from inside the script at that point, since
+    Python never starts; the in-script re-exec in `githook_shim.py` stays
+    in place as the isolation path on Windows (untouched here) and as a
+    safety net should a future platform's `env` lack `-S`.
+    """
+    if platform == "nt":
+        return f"/usr/bin/env {shim_interpreter(platform)}"
+    return f"/usr/bin/env -S {shim_interpreter(platform)} -I -S"
+
+
 def render_shim(hook: str, plugin_root: Path, platform: str = os.name) -> str:
     text = SHIM_TEMPLATE.read_text(encoding="utf-8")
     substitutions = {
-        "SHEBANG": f"/usr/bin/env {shim_interpreter(platform)}",
+        "SHEBANG": shim_shebang(platform),
         "PLUGIN_ROOT": str(plugin_root),
         "HOOK": hook,
     }

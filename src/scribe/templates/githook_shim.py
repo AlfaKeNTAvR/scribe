@@ -9,8 +9,15 @@ HOOK = "{{HOOK}}"
 if os.environ.get("SCRIBE_SKIP_HOOKS") == "1":
     sys.exit(0)
 # A git hook starts through a shebang, unlike the registered Claude hooks.
-# Re-exec under isolated no-site mode before importing the supervisor.  Any
-# failure remains fail-open below.
+# On POSIX the shebang itself already starts this process isolated
+# (`env -S python3 -I -S`, rendered by init_repo.shim_shebang), so
+# `sys.flags.isolated` is already true and this re-exec is skipped; it only
+# fires on Windows (whose shebang has no `-S`) or on a POSIX `env` too old
+# to support `-S`. Isolation matters before importing the supervisor below:
+# an unisolated interpreter still honours the caller's PYTHONHOME,
+# PYTHONPATH and site customization, any of which can crash Python before
+# this script's own exception handling ever runs. Any re-exec failure here
+# remains fail-open below.
 if not sys.flags.isolated:
     try:
         os.execv(sys.executable, [sys.executable, "-I", "-S", __file__, *sys.argv[1:]])

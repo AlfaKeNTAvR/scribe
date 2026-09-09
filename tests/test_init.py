@@ -105,7 +105,10 @@ def test_init_installs_four_managed_executable_hooks(
     for name in HOOK_NAMES:
         hook = hooks_dir(tmp_repo) / name
         text = hook.read_text(encoding="utf-8")
-        assert text.startswith("#!/usr/bin/env python3\n")
+        # -I -S isolates the very first interpreter start from a broken
+        # PYTHONHOME/PYTHONPATH; see init_repo.shim_shebang and
+        # test_supervise.test_installed_shim_survives_a_broken_pythonhome.
+        assert text.startswith("#!/usr/bin/env -S python3 -I -S\n")
         assert "# scribe-managed" in text
         assert f'HOOK = "{name}"' in text
         assert f'PLUGIN_ROOT = r"{PROJECT_ROOT}"' in text

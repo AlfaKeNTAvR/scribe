@@ -285,6 +285,33 @@ def test_installed_shim_lets_the_commit_through_when_uv_is_broken(
     assert "prepare-commit-msg" in result.stderr and "post-commit" in result.stderr
 
 
+def test_installed_shim_survives_a_broken_pythonhome(shim_repo: Path) -> None:
+    """Shim startup isolation (Codex review, docs/build/08-codex-review-batch-a.md
+    "New defects": "The installed shim lacks equivalent isolation"). The
+    rendered shebang (`env -S python3 -I -S`) isolates the very first
+    interpreter start, so a broken PYTHONHOME cannot crash Python before the
+    shim's own re-exec or the supervisor it hands off to ever runs.
+
+    Fails on the old code: a plain `#!/usr/bin/env python3` shebang starts
+    an unisolated interpreter first, and CPython aborts with a fatal error
+    (unable to locate the standard library, `ModuleNotFoundError: No module
+    named 'encodings'`) when PYTHONHOME points nowhere real, before the
+    in-script re-exec's own `try/except` ever gets a chance to run; git then
+    reports the hook as having failed and aborts the commit.
+    """
+    (shim_repo / "notes.md").write_text("hello\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(shim_repo), "add", "notes.md"], check=True)
+    result = subprocess.run(
+        ["git", "-C", str(shim_repo), "commit", "-q", "-m", "docs: Notes"],
+        env={**os.environ, "PYTHONHOME": "/nonexistent"},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (shim_repo / ".claude" / "scribe" / "hook-errors.log").exists()
+
+
 def test_installed_shim_forwards_a_deliberate_commit_rejection(
     shim_repo: Path, set_config
 ) -> None:
