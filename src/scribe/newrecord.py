@@ -13,7 +13,10 @@ untouched and reports the validator's problems.
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,7 +27,9 @@ from .record import utc_now
 from .schema import KEYS, Problem, validate_record
 from .state import (
     RECORDS_WRITTEN_CAP,
+    ledger_lock_path,
     load_state,
+    locked,
     push_recent,
     session_entry,
     update_state,
@@ -37,6 +42,9 @@ SLUG_MAX_LENGTH = 40
 SLUG_FALLBACK = "decision"
 DEFAULT_BY = "scribe-new"
 UNKNOWN_SESSION = "unknown"
+# V8: exclusive-create keeps retrying numbered suffixes; this bounds the retry
+# so a pathological collision fails cleanly instead of looping forever.
+MAX_ALIAS_ATTEMPTS = 1000
 
 SPEC_FRONT_MATTER_KEYS = (
     "title",
@@ -120,15 +128,59 @@ def slugify(title: str) -> str:
     return trimmed or SLUG_FALLBACK
 
 
-def unique_alias(store: Store, slug: str, today: str) -> str:
-    """`D-YYMMDD-<slug>`, with `-2`, `-3` appended while the file already exists."""
-    stem = f"D-{today[2:].replace('-', '')}-{slug}"
-    candidate = stem
-    suffix = 1
-    while (store.path / f"{candidate}.md").exists():
+def alias_stem(slug: str, today: str) -> str:
+    return f"D-{today[2:].replace('-', '')}-{slug}"
+
+
+def _alias_candidates(stem: str) -> Iterator[str]:
+    """`stem`, then `stem-2`, `stem-3`, ... without bound; callers cap attempts."""
+    yield stem
+    suffix = 2
+    while True:
+        yield f"{stem}-{suffix}"
         suffix += 1
-        candidate = f"{stem}-{suffix}"
-    return candidate
+
+
+def unique_alias(store: Store, slug: str, today: str) -> str:
+    """`D-YYMMDD-<slug>`, with `-2`, `-3` appended while the file already exists.
+
+    Best-effort only: two callers can both see the same free alias here before
+    either writes. `_write_record_exclusive` is what actually reserves the
+    filename (V8), retrying this same sequence under `open(path, "x")`.
+    """
+    stem = alias_stem(slug, today)
+    for candidate in _alias_candidates(stem):
+        if not (store.path / f"{candidate}.md").exists():
+            return candidate
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _write_record_exclusive(
+    store: Store, stem: str, data: dict[str, Any], body: str
+) -> tuple[Path, str] | None:
+    """Reserve a filename and write the record under exclusive create (V8).
+
+    Tries `stem`, then `stem-2`, `stem-3`, ... via `os.O_EXCL`, so two `scribe
+    new` runs racing on the same title can never overwrite one another: the
+    loser always advances to the next unused suffix rather than clobbering the
+    winner's file. `data["alias"]` is updated in place to match whichever
+    candidate is finally used. Returns None (nothing written) once
+    MAX_ALIAS_ATTEMPTS candidates are all taken.
+    """
+    store.path.mkdir(parents=True, exist_ok=True)
+    for attempt, candidate in enumerate(_alias_candidates(stem)):
+        if attempt >= MAX_ALIAS_ATTEMPTS:
+            return None
+        data["alias"] = candidate
+        candidate_path = store.path / f"{candidate}.md"
+        try:
+            descriptor = os.open(candidate_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            continue
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(join(data, body))
+        return candidate_path, candidate
+    return None
 
 
 def _blockquote(text: str) -> str:
@@ -289,39 +341,65 @@ def create_record(
     session: str | None = None,
     register: bool = False,
 ) -> tuple[Path | None, list[Problem]]:
-    """Write one record from the spec; on any validator error nothing is written."""
+    """Write one record from the spec; on any validator error nothing is written.
+
+    V8: the whole mutating part runs under the shared ledger lock, records are
+    reloaded right after it is acquired, and the file itself is reserved with
+    exclusive create so a same-title race can never overwrite another writer.
+    """
     now = utc_now()
     today = datetime.now(timezone.utc).date().isoformat()
-    session_task_refs, session_prompt_ids = _session_defaults(store.root, session)
-
     title = str(spec.get("title", "")).strip()
-    alias = unique_alias(store, slugify(title), today)
-    data = build_front_matter(
-        spec,
-        generate(),
-        alias,
-        today,
-        session,
-        session_task_refs,
-        session_prompt_ids,
-    )
-    author = by or data["provenance"].get("agent") or DEFAULT_BY
-    data["history"] = [_history_entry(author, session, now)]
-    body = render_body(spec, title)
-    path = store.path / f"{alias}.md"
+    slug = slugify(title)
+    stem = alias_stem(slug, today)
 
-    problems = validate_record(data, body, store=store, path=path)
-    if any(problem.severity == "error" for problem in problems):
-        return None, problems
+    with locked(ledger_lock_path(store.root)) as acquired:
+        if not acquired:
+            print(
+                "scribe new: ledger lock timeout; no record written",
+                file=sys.stderr,
+            )
+            return None, []
+        store.records(refresh=True)
+        session_task_refs, session_prompt_ids = _session_defaults(store.root, session)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(join(data, body), encoding="utf-8", newline="\n")
+        alias = unique_alias(store, slug, today)
+        data = build_front_matter(
+            spec,
+            generate(),
+            alias,
+            today,
+            session,
+            session_task_refs,
+            session_prompt_ids,
+        )
+        author = by or data["provenance"].get("agent") or DEFAULT_BY
+        data["history"] = [_history_entry(author, session, now)]
+        body = render_body(spec, title)
+        path = store.path / f"{alias}.md"
 
-    records = store.records(refresh=True)
-    if data["supersedes"] is not None:
-        for changed in reconcile_supersession(records, DEFAULT_BY):
-            changed.save()
-    write_index(store)
-    if register:
-        _register(store.root, session, data["id"], now)
-    return path, problems
+        problems = validate_record(data, body, store=store, path=path)
+        if any(problem.severity == "error" for problem in problems):
+            return None, problems
+
+        written = _write_record_exclusive(store, stem, data, body)
+        if written is None:
+            return None, [
+                *problems,
+                Problem(
+                    "error",
+                    "alias_reservation_failed",
+                    f"could not reserve a unique filename for {stem} "
+                    f"after {MAX_ALIAS_ATTEMPTS} attempts",
+                ),
+            ]
+        path, _final_alias = written
+
+        records = store.records(refresh=True)
+        if data["supersedes"] is not None:
+            for changed in reconcile_supersession(records, DEFAULT_BY):
+                changed.save()
+        write_index(store)
+        if register:
+            _register(store.root, session, data["id"], now)
+        return path, problems

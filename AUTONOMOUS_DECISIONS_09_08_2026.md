@@ -196,3 +196,8 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 - I112 (V19). `state.push_recent` takes `cap: int | None`; `None` means no truncation. `_register` passes None for `pending_decisions` and keeps the `records_written` cap. Ids leave `pending_decisions` only by post-commit consumption or session expiry.
 - I113 (V19). The 25-id test lives in test_githooks.py and calls `prepare_commit_msg.candidates` directly rather than running 25 real commits.
 - I114 (V19). `test_rejected_and_retired_records_are_not_candidates` flaked once under full-suite load (subprocess result None); passed in isolation and on a second full run; not investigated in this item.
+- I115 (V8, worktree agent). `create_record` takes the ledger lock unconditionally, not only under `--register`, because plain `new` with `supersedes` also mutates other records and the index.
+- I116 (V8). On an alias collision at write time (exclusive create fails) the loser advances to the next numbered suffix, bounded at 1000 attempts, then fails cleanly with `alias_reservation_failed` and writes nothing.
+- I117 (V8). The shared lock keeps the file name `ratify.lock`, defined once as `state.LEDGER_LOCK_FILE`; `ratify.LOCK_FILE` stays as an alias.
+- I118 (V8). New call sites print their lock-timeout line to stderr; ratify still prints its own to stdout (pre-existing, tested); cosmetic inconsistency left for a later pass.
+- I119 (V8). `lint --expire` reports a lock timeout as an error-severity finding `ledger_lock_timeout`, which already makes lint exit 1.

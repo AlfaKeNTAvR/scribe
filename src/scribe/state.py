@@ -24,6 +24,12 @@ STATE_VERSION = 1
 STATE_DIR = Path(".claude") / "scribe"
 STATE_FILE = "state.json"
 LOCK_FILE = "state.json.lock"
+# V8: the one worktree-local lock every ledger-file writer takes, not just
+# ratify/reject. Kept as a separate lock file from LOCK_FILE above: that one
+# guards scratch state.json, this one guards docs/decisions/*.md and
+# RATIFICATIONS.jsonl. `ratify.py` re-exports this as `ratify.LOCK_FILE` for
+# callers and tests that reach into it by that name.
+LEDGER_LOCK_FILE = "ratify.lock"
 ERROR_LOG_FILE = "hook-errors.log"
 ERROR_LOG_MAX_BYTES = 200 * 1024
 
@@ -50,6 +56,12 @@ def state_path(root: str | Path) -> Path:
 
 def error_log_path(root: str | Path) -> Path:
     return state_dir(root) / ERROR_LOG_FILE
+
+
+def ledger_lock_path(root: str | Path) -> Path:
+    """The single lock every ledger-file writer (new, ratify, post-commit,
+    relink, lint --expire) takes before touching docs/decisions (V8)."""
+    return state_dir(root) / LEDGER_LOCK_FILE
 
 
 def log_hook_error(root: str | Path | None, message: str) -> None:

@@ -13,12 +13,14 @@ is added. There is no range option: relink always looks at the whole history.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from . import gitutil
 from .links import implementation_paths, mark_implemented, short_sha
 from .lookup import TRAILER_KEY, trailer_tokens
 from .record import Record, utc_now
+from .state import ledger_lock_path, locked
 from .store import Store
 
 BY = "scribe-relink"
@@ -88,30 +90,47 @@ def run_relink(start: str | Path = ".") -> tuple[int, list[str]]:
     if store is None or not store.path.is_dir():
         return 1, ["no decision store found (docs/decisions)"]
 
-    reachable = gitutil.ReachableCommits(root)
-    matches = _implementing_commits(store, root, reachable)
-    now = utc_now()
-    changed_records: list[Record] = []
-    lines: list[str] = []
+    # V8: share the ledger lock with new/ratify/post-commit/lint --expire; on
+    # timeout, behave like ratify (one stderr line, nothing written, non-zero
+    # exit for this CLI command).
+    with locked(ledger_lock_path(root)) as acquired:
+        if not acquired:
+            print(
+                "scribe relink: ledger lock timeout; nothing relinked",
+                file=sys.stderr,
+            )
+            return 1, []
+        store.records(refresh=True)
+        reachable = gitutil.ReachableCommits(root)
+        matches = _implementing_commits(store, root, reachable)
+        now = utc_now()
+        changed_records: list[Record] = []
+        lines: list[str] = []
 
-    for record in store.records():
-        record_id = str(record.data.get("id"))
-        old_links = list(record.data.get("implementation_links") or [])
-        new_links = _rebuild_links(record, reachable, matches.get(record_id, []), root)
-        if new_links == old_links:
-            continue
-        record.apply_change("implementation_links", new_links, "relinked", BY, at=now)
-        if new_links:
-            mark_implemented(record, str(new_links[-1]["commit"]), BY, now)
-        changed_records.append(record)
-        lines.append(f"relinked {record.data.get('alias')}: {len(new_links)} commit(s)")
+        for record in store.records():
+            record_id = str(record.data.get("id"))
+            old_links = list(record.data.get("implementation_links") or [])
+            new_links = _rebuild_links(
+                record, reachable, matches.get(record_id, []), root
+            )
+            if new_links == old_links:
+                continue
+            record.apply_change(
+                "implementation_links", new_links, "relinked", BY, at=now
+            )
+            if new_links:
+                mark_implemented(record, str(new_links[-1]["commit"]), BY, now)
+            changed_records.append(record)
+            lines.append(
+                f"relinked {record.data.get('alias')}: {len(new_links)} commit(s)"
+            )
 
-    for record in changed_records:
-        record.save()
-    if changed_records:
-        from .index import write_index
+        for record in changed_records:
+            record.save()
+        if changed_records:
+            from .index import write_index
 
-        write_index(store)
-    if not lines:
-        lines.append("scribe relink: nothing to relink")
-    return 0, lines
+            write_index(store)
+        if not lines:
+            lines.append("scribe relink: nothing to relink")
+        return 0, lines

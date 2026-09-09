@@ -21,7 +21,7 @@ from scribe.index import write_index
 from scribe.links import add_link, implementation_paths, mark_implemented, short_sha
 from scribe.lookup import TRAILER_KEY, trailer_tokens
 from scribe.record import Record, utc_now
-from scribe.state import load_state, update_state
+from scribe.state import ledger_lock_path, load_state, locked, update_state
 from scribe.store import Store
 
 GUARD_ENV = "SCRIBE_IN_POST_COMMIT"
@@ -73,34 +73,45 @@ def run(args: Sequence[str]) -> int:
     sha = gitutil.head_sha(root)
     if sha is None:
         return 0
-    changed = gitutil.commit_changed_paths("HEAD", root)
-    now = utc_now()
-    linked: list[Record] = []
-    implemented: list[Record] = []
-    changed_records: list[Record] = []
-    for record in referenced_records(store, root):
-        paths = implementation_paths(record, changed)
-        if not paths:
-            continue
-        implemented.append(record)
-        record_changed = False
-        if add_link(record, sha, paths, BY, now):
-            linked.append(record)
-            record_changed = True
-        if mark_implemented(record, sha, BY, now):
-            record_changed = True
-        if record_changed:
-            changed_records.append(record)
-    if not implemented:
-        return 0
-    for record in changed_records:
-        record.save()
-    write_index(store)
-    consume_pending(root, {str(record.data.get("id")) for record in implemented})
-    if linked:
-        print(
-            f"scribe: linked {len(linked)} record(s) to {short_sha(sha)}; "
-            "run git add docs/decisions to include the backlinks in your next commit",
-            file=sys.stderr,
-        )
+
+    # V8: share the ledger lock with new/ratify/relink/lint --expire. A git
+    # hook fails open: on timeout, log and exit 0 without writing anything.
+    with locked(ledger_lock_path(root)) as acquired:
+        if not acquired:
+            print(
+                "scribe: post-commit: ledger lock timeout; no links written",
+                file=sys.stderr,
+            )
+            return 0
+        store.records(refresh=True)
+        changed = gitutil.commit_changed_paths("HEAD", root)
+        now = utc_now()
+        linked: list[Record] = []
+        implemented: list[Record] = []
+        changed_records: list[Record] = []
+        for record in referenced_records(store, root):
+            paths = implementation_paths(record, changed)
+            if not paths:
+                continue
+            implemented.append(record)
+            record_changed = False
+            if add_link(record, sha, paths, BY, now):
+                linked.append(record)
+                record_changed = True
+            if mark_implemented(record, sha, BY, now):
+                record_changed = True
+            if record_changed:
+                changed_records.append(record)
+        if not implemented:
+            return 0
+        for record in changed_records:
+            record.save()
+        write_index(store)
+        consume_pending(root, {str(record.data.get("id")) for record in implemented})
+        if linked:
+            print(
+                f"scribe: linked {len(linked)} record(s) to {short_sha(sha)}; "
+                "run git add docs/decisions to include the backlinks in your next commit",
+                file=sys.stderr,
+            )
     return 0

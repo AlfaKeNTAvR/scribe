@@ -8,8 +8,10 @@ and no `verify_error`.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,7 +22,7 @@ from scribe import ulid
 from scribe.frontmatter import join, split
 from scribe.lint import STALE_PROPOSAL_DAYS, run_lint
 from scribe.record import Record
-from scribe.state import update_state
+from scribe.state import ledger_lock_path, update_state
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = (
@@ -457,6 +459,35 @@ def test_expire_leaves_a_young_proposal_alone(run_cli: RunCli, lint_repo: Path) 
     _, findings = lint(run_cli, lint_repo, "--expire")
 
     assert "proposal_stale" not in codes(findings)
+    assert Record.load(path).data["effective_state"] == "proposed"
+
+
+def test_expire_lock_timeout_reports_error_and_changes_nothing(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    """V8: a lock held past the timeout behaves like ratify: one stderr line,
+    nothing expired, non-zero exit (an error finding among the others)."""
+    path = write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        date=days_ago(STALE_PROPOSAL_DAYS + 10),
+    )
+    lock_path = ledger_lock_path(lint_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code, stdout, stderr = run_cli(["lint", "--expire", "--json"], lint_repo)
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    findings = json.loads(stdout)["findings"]
+    assert elapsed >= 2.0
+    assert code == 1
+    assert "ledger lock timeout" in stderr
+    assert "ledger_lock_timeout" in codes(findings)
     assert Record.load(path).data["effective_state"] == "proposed"
 
 

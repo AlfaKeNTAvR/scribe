@@ -19,10 +19,10 @@ from pathlib import Path
 
 from .index import write_index
 from .record import Record, utc_now
-from .state import locked, state_dir
+from .state import LEDGER_LOCK_FILE, ledger_lock_path, locked
 from .store import Store, attestation_line_problems, reconcile_supersession
 
-LOCK_FILE = "ratify.lock"
+LOCK_FILE = LEDGER_LOCK_FILE  # V8: shared with new, post-commit, relink, lint --expire
 ATTESTATIONS_FILE = "RATIFICATIONS.jsonl"
 VERDICTS = {"ratify": "ratified", "reject": "rejected"}
 VIA_VALUES = ("skill", "cli", "hand-written")
@@ -101,7 +101,7 @@ def apply_verdict(
 ) -> Outcome:
     verdict = VERDICTS[verb]
     stamp = at or utc_now()
-    with locked(state_dir(store.root) / LOCK_FILE) as acquired:
+    with locked(ledger_lock_path(store.root)) as acquired:
         if not acquired:
             return Outcome(1, "ratification lock timeout; retry the same command")
         broken = _ledger_broken(store)

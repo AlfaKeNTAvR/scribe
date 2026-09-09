@@ -12,15 +12,18 @@ and leaves exactly the reachable commits linked, belongs here.
 
 from __future__ import annotations
 
-import os
+import fcntl
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 from scribe.newrecord import create_record, load_spec
 from scribe.record import Record
+from scribe.state import ledger_lock_path
 from scribe.store import Store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -124,6 +127,33 @@ def test_relink_keeps_two_already_linked_commits(
     assert second.returncode == 0, second.stderr
     assert link_commits(load(repo, alias)) == {old_sha, new_sha}
     assert "nothing to relink" in second.stdout
+
+
+def test_relink_lock_timeout_exits_nonzero_without_writing(
+    repo_with_record: tuple[Path, Record],
+) -> None:
+    """V8: a lock held past the timeout behaves like ratify (one stderr line,
+    nothing written, non-zero exit for this CLI command)."""
+    repo, record = repo_with_record
+    alias, ulid = record.data["alias"], record.data["id"]
+    trailer = f"{alias} {ulid}"
+    write(repo, "src/x.py")
+    commit(repo, "feat: Implement x", "src/x.py", decision=trailer)
+    before = load(repo, alias).data
+
+    lock_path = ledger_lock_path(repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        result = run_relink(repo)
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    assert elapsed >= 2.0
+    assert result.returncode == 1
+    assert "ledger lock timeout" in result.stderr
+    assert load(repo, alias).data == before
 
 
 def test_relink_drops_the_stale_sha_after_amend(

@@ -4,10 +4,12 @@ The hooks are installed as files that call `sys.executable -m scribe git-hook
 <name>` (no shim, no uv), and real `git commit` runs in the tmp repo.
 """
 
+import fcntl
 import json
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -17,7 +19,7 @@ from scribe.githooks import prepare_commit_msg
 from scribe.links import add_link, implementation_paths
 from scribe.newrecord import create_record, load_spec
 from scribe.record import Record
-from scribe.state import state_path
+from scribe.state import ledger_lock_path, state_path
 from scribe.store import Store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -404,6 +406,39 @@ def test_post_commit_saves_proposed_lifecycle_when_link_already_exists(
     assert len(saved.data["implementation_links"]) == 1
     assert [item["event"] for item in saved.data["history"]].count("implemented") == 1
     assert pending_ids(hooked_repo) == []
+
+
+def test_post_commit_lock_timeout_fails_open_without_writing(
+    hooked_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """V8/V9: a lock held past the timeout writes nothing, but a git hook
+    still fails open (exit 0) rather than blocking the commit."""
+    record, sha = commit_implementation_without_post_commit(hooked_repo)
+    alias = str(record.data["alias"])
+    before = load(hooked_repo, alias).data
+    monkeypatch.setattr(
+        post_commit_module,
+        "repo_store",
+        lambda: (hooked_repo, Store(hooked_repo)),
+    )
+    lock_path = ledger_lock_path(hooked_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code = run_post_commit_direct()
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    stderr = capsys.readouterr().err
+    assert elapsed >= 2.0
+    assert code == 0
+    assert "ledger lock timeout" in stderr
+    assert load(hooked_repo, alias).data == before
+    assert pending_ids(hooked_repo) == [str(record.data["id"])]
 
 
 # --- (c): unrelated staged file --------------------------------------------

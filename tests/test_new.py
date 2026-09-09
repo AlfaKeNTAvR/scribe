@@ -1,13 +1,16 @@
+import fcntl
 import json
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from scribe import newrecord as newrecord_module
 from scribe.newrecord import slugify
 from scribe.record import Record
 from scribe.schema import validate_record
-from scribe.state import session_entry, state_path, update_state
+from scribe.state import ledger_lock_path, session_entry, state_path, update_state
 from scribe.store import Store
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -200,6 +203,60 @@ def test_new_twice_with_the_same_title_appends_a_suffix(
     assert second.exists()
     assert Record.load(second).data["alias"] == f"{today_alias(SPEC_SLUG)}-2"
     assert stdout.strip().endswith(f"{today_alias(SPEC_SLUG)}-2.md")
+
+
+def test_new_alias_race_with_a_pre_created_file_advances_to_the_next_suffix(
+    run_cli: RunCli, session_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """V8: `unique_alias` is only a best-effort guess; two callers can both see
+    the same free alias. Simulate the race by pinning it to an alias whose
+    file another writer has already created; exclusive create must notice the
+    collision at write time and advance to `-2` instead of overwriting it.
+    """
+    alias = today_alias(SPEC_SLUG)
+    decisions = session_state / "docs" / "decisions"
+    pre_existing = decisions / f"{alias}.md"
+    pre_existing.write_text("written by another racing writer\n", encoding="utf-8")
+    monkeypatch.setattr(
+        newrecord_module, "unique_alias", lambda store, slug, today: alias
+    )
+
+    code, stdout = run_new(run_cli, session_state, SPEC)
+    second = decisions / f"{alias}-2.md"
+
+    assert code == 0
+    assert stdout.strip().endswith(f"{alias}-2.md")
+    assert second.exists()
+    assert Record.load(second).data["alias"] == f"{alias}-2"
+    # the other writer's file was never touched
+    assert (
+        pre_existing.read_text(encoding="utf-8") == "written by another racing writer\n"
+    )
+
+
+def test_new_lock_timeout_exits_nonzero_without_writing(
+    run_cli: RunCli, tmp_repo: Path
+) -> None:
+    lock_path = ledger_lock_path(tmp_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    before = sorted(p.name for p in (tmp_repo / "docs" / "decisions").glob("D-*.md"))
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code, stdout, stderr = run_cli(
+            ["new", "--spec", str(SPEC), "--register"], tmp_repo
+        )
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    assert elapsed >= 2.0
+    assert code == 1
+    assert "ledger lock timeout" in stderr
+    assert "no record written" in stdout
+    after = sorted(p.name for p in (tmp_repo / "docs" / "decisions").glob("D-*.md"))
+    assert after == before
+    assert not state_path(tmp_repo).exists()
 
 
 def test_new_with_supersedes_retires_the_predecessor(

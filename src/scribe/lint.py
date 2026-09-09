@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -27,7 +28,7 @@ from .matching import matches
 from .policy import RULE_NAMES
 from .record import Record
 from .schema import validate_record
-from .state import load_state, update_state
+from .state import ledger_lock_path, load_state, locked, update_state
 from .store import Store, reconcile_supersession
 
 STALE_PROPOSAL_DAYS = 30
@@ -298,27 +299,61 @@ def _is_stale_proposal(record: Record, today: date) -> bool:
     return written is not None and today - written > timedelta(days=STALE_PROPOSAL_DAYS)
 
 
+def _proposal_stale_finding(store: Store, record: Record, expired: bool) -> Finding:
+    return Finding(
+        "warning",
+        "proposal_stale",
+        f"proposed and unreviewed since {_as_date(record.data.get('date'))}"
+        + (", expired by --expire" if expired else ""),
+        _relative(store, record.path),
+    )
+
+
+def _expire_stale(store: Store, today: date) -> list[Finding]:
+    """Reload, then move every still-stale proposal to expired (V8: ledger lock).
+
+    On a lock timeout this reports one error finding and one stderr line, and
+    changes nothing; `_stale_proposal_findings` still reports the plain
+    (un-suffixed) `proposal_stale` warnings from its own pre-lock scan.
+    """
+    with locked(ledger_lock_path(store.root)) as acquired:
+        if not acquired:
+            print(
+                "scribe lint --expire: ledger lock timeout; nothing expired",
+                file=sys.stderr,
+            )
+            return [
+                Finding(
+                    "error",
+                    "ledger_lock_timeout",
+                    "ledger lock timeout; --expire made no changes",
+                )
+            ]
+        store.records(refresh=True)
+        stale = [
+            record for record in store.records() if _is_stale_proposal(record, today)
+        ]
+        findings = [
+            _proposal_stale_finding(store, record, expired=True) for record in stale
+        ]
+        for record in stale:
+            record.apply_change("effective_state", "expired", "expired", LINT_BY)
+            record.save()
+        for record in reconcile_supersession(store.records(), LINT_BY):
+            record.save()
+        return findings
+
+
 def _stale_proposal_findings(store: Store, today: date, expire: bool) -> list[Finding]:
     """`proposal_stale`, and with `--expire` the expiry and the restore it triggers."""
     stale = [record for record in store.records() if _is_stale_proposal(record, today)]
-    findings = [
-        Finding(
-            "warning",
-            "proposal_stale",
-            f"proposed and unreviewed since {_as_date(record.data.get('date'))}"
-            + (", expired by --expire" if expire else ""),
-            _relative(store, record.path),
-        )
-        for record in stale
-    ]
-    if not expire or not stale:
-        return findings
-    for record in stale:
-        record.apply_change("effective_state", "expired", "expired", LINT_BY)
-        record.save()
-    for record in reconcile_supersession(store.records(), LINT_BY):
-        record.save()
-    return findings
+    if not stale:
+        return []
+    if not expire:
+        return [
+            _proposal_stale_finding(store, record, expired=False) for record in stale
+        ]
+    return _expire_stale(store, today)
 
 
 def _verify_findings(store: Store, files: list[str]) -> list[Finding]:
