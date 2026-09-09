@@ -1,0 +1,33 @@
+You are implementing "Batch A" of the validation triage for `scribe`, a Claude Code plugin in /home/alfakentavr/scribe (git repo, branch nikita/feat/scribe-bootstrap, workspace-write sandbox; .git is read-only for you, so never run git commands that write; read-only git such as log, status, diff, show, rev-list is fine; the main session commits your work afterwards from a commit queue you write).
+
+Read first:
+1. /home/alfakentavr/scribe/docs/build/06-validation-triage.md, section "Batch A": the 15 items you must implement, each with the intended fix. Do not touch Batch B or C items.
+2. /home/alfakentavr/scribe/docs/build/04b-codex-validation.md: the full text of V4, V5, V7, V9, V10, V11, V14, V15, V16, V17, V18, V19, V20, V22, and the conformance note about unquoted CI-source paths. The findings were written by a previous Codex validation pass; each has a concrete reproduction to turn into a test.
+3. /home/alfakentavr/scribe/docs/build/03-plan-v2.md sections 3 to 5 (the binding spec), and section 0.1 (implementer contract).
+4. /home/alfakentavr/scribe/README.md and skim src/scribe/ and tests/.
+
+Environment: uv only, no installs. If `uv run` fails because the default cache is read-only, use `UV_CACHE_DIR=/tmp/scribe-uv-cache UV_OFFLINE=1` in front of every uv command (the T16 run did this successfully). The suite currently prints `345 passed, 3 skipped`. Run `uv run pytest -q` after every group; it must stay green with exactly the 3 existing skips.
+
+Rules: plain hyphens only, no em or en dashes, no emojis, in any file; never edit the three record bodies under docs/decisions/D-*.md, never edit docs/decisions/RATIFICATIONS.jsonl; do not edit anything under docs/build/ except the new file docs/build/07-batch-a-report.md; append new I-lines (continue the numbering after the last I-line, currently I73) to the "## Step 4 implementer decisions" section of /home/alfakentavr/scribe/AUTONOMOUS_DECISIONS_09_08_2026.md for every non-obvious choice; never change a public CLI flag or hook registration; keep every existing test passing unless the finding says the test encoded the defect (then fix the test and say so in an I-line).
+
+Work in these groups, in order, and finish each group (code, tests, suite green) before starting the next, so a partial run still leaves a committable state:
+
+Group 1 (S items): V4, V7 body bytes, V9, V10, V11 plus the `rm -rf build /tmp/other` miss, V22, and the shlex.quote for CI-source paths.
+Group 2: V15, V16, V18, V19 (template single pass and explicit empty lists only; leave the pending cap alone), V20.
+Group 3 (M items): V5, V14, V17.
+
+Each finding gets at least one test that reproduces the defect as the validation described it (the test must fail on the old code; say in the report which assertion would have failed).
+
+After each group append to /home/alfakentavr/scribe/docs/build/07-batch-a-report.md: a "## Group N" section with the files changed, the test names added, the suite count, and a proposed commit message in this exact format (type: Capitalised title under 70 chars, blank line, one or two sentence body saying why and what, no file lists):
+
+```
+fix: <title>
+
+<body>
+```
+
+If you run out of time mid-group, leave the tree in a state where `uv run pytest -q` is green (revert the half-finished group's edits by hand if needed; you cannot use git checkout) and say so in the report under "## Remaining".
+
+You may spawn gpt-5.6-sol subagents for individual items, but you run the suite and write the report yourself.
+
+Finish with one line: `DONE: groups <list> complete, <N> passed, 3 skipped, report at docs/build/07-batch-a-report.md`, or `PARTIAL: <what remains>`.
