@@ -136,15 +136,39 @@ def collapse_whitespace(command: str) -> str:
     return " ".join(command.split())
 
 
+# A trailing backslash before a newline (optionally with a CR, for CRLF
+# files) is a shell line continuation: the backslash and the newline are
+# removed and the next line becomes part of the same logical command.  Join
+# these away before splitting on newlines, so a rule that spans a
+# continuation (`git push origin main \` / `  --force`) still sees one
+# segment.  This does not track quote state, so a literal backslash-newline
+# inside quotes is joined too; that is a deliberate simplification (exact
+# shell semantics would need a real tokenizer) and it only ever merges more
+# of the command into one segment, never less, so it cannot reopen the rm
+# command-boundary bug that a plain, non-continued newline still guards
+# against.
+LINE_CONTINUATION = re.compile(r"\\\r?\n")
+
+
+def join_line_continuations(command: str) -> str:
+    """Collapse backslash-newline continuations into their logical line."""
+    return LINE_CONTINUATION.sub(" ", command)
+
+
 def matching_rules(command: str) -> list[str]:
     """Names of every denylist rule the command triggers, in `RULES` order.
 
     Rules may scan arguments in either order, but never borrow an option or a
-    target from a later shell command.  Newlines are command separators too.
+    target from a later shell command.  Newlines are command separators too,
+    except where a backslash continues the line (`join_line_continuations`).
     """
-    segments = [collapse_whitespace(part) for part in re.split(r"\r?\n|;|&&|\|\||\|", command)]
+    joined = join_line_continuations(command)
+    segments = [
+        collapse_whitespace(part) for part in re.split(r"\r?\n|;|&&|\|\||\|", joined)
+    ]
     return [
-        name for name, pattern in RULES
+        name
+        for name, pattern in RULES
         if any(pattern.search(segment) for segment in segments)
     ]
 

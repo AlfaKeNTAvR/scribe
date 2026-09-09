@@ -169,6 +169,45 @@ def test_matching_rules_reports_every_hit_in_order() -> None:
     ]
 
 
+def test_denylist_matches_backslash_continued_git_push() -> None:
+    # Reviewer repro (11-fable-final-review.md, New defects item 1): a
+    # command continued onto a second line with a trailing backslash.  On
+    # the pre-fix code this splits into "git push origin main \\" and
+    # "--force" and `denied_rule` returns None instead of "git-push-force".
+    command = "git push origin main \\\n  --force"
+    assert policy.denied_rule(command) == "git-push-force"
+
+
+def test_denylist_matches_backslash_continued_rm() -> None:
+    # Reviewer repro, same defect: `rm -rf \` continued onto a second line
+    # that carries the target.  Pre-fix, `denied_rule` returns None instead
+    # of "rm-rf-outside-worktree".
+    command = "rm -rf \\\n  /tmp/x"
+    assert policy.denied_rule(command) == "rm-rf-outside-worktree"
+
+
+def test_denylist_matches_backslash_continued_crlf() -> None:
+    # Same continuation, but with a Windows CRLF line ending (PowerShell is
+    # one of the two tools the gate covers).  Pre-fix, the plain `\r?\n`
+    # split still breaks this into two non-matching segments, so
+    # `denied_rule` returns None instead of "git-push-force".
+    command = "git push origin main \\\r\n  --force"
+    assert policy.denied_rule(command) == "git-push-force"
+
+
+def test_denylist_allows_rm_boundary_across_a_real_newline() -> None:
+    # Regression guard for the fix this defect follows (08-codex-review-
+    # batch-a.md, "rm detection borrows flags and targets from later
+    # commands"): a plain newline with no backslash is still a command
+    # boundary, so the trailing rm rule must not borrow printf's -rf flag
+    # and target.  This holds on both the pre- and post-fix code: the old
+    # code already treats every newline as a boundary, and the fix only
+    # joins a newline that is preceded by a backslash, so this real,
+    # non-continued newline is untouched either way.
+    command = "rm build\nprintf '%s\\n' -rf /tmp/example"
+    assert policy.denied_rule(command) is None
+
+
 # --- policy: plan areas -------------------------------------------------------
 
 
@@ -284,12 +323,18 @@ def test_unratified_or_two_way_door_action_record_does_not_allow(
     assert not pre_tool_use_gate.action_is_ratified(Store(tmp_repo), "git-push-force")
 
 
-@pytest.mark.parametrize("change", ["unattested", "expired", "superseded", "body_hash_mismatch"])
-def test_action_authority_requires_live_matching_attestation(tmp_repo: Path, change: str) -> None:
+@pytest.mark.parametrize(
+    "change", ["unattested", "expired", "superseded", "body_hash_mismatch"]
+)
+def test_action_authority_requires_live_matching_attestation(
+    tmp_repo: Path, change: str
+) -> None:
     write_ratified_action_record(tmp_repo, "git-push-force")
     path = tmp_repo / "docs" / "decisions" / "D-260908-allow-the-action.md"
     if change == "unattested":
-        (tmp_repo / "docs" / "decisions" / "RATIFICATIONS.jsonl").write_text("", encoding="utf-8")
+        (tmp_repo / "docs" / "decisions" / "RATIFICATIONS.jsonl").write_text(
+            "", encoding="utf-8"
+        )
     else:
         record = Record.load(path)
         if change == "expired":

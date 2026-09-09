@@ -224,3 +224,7 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 - I125 (Q3). The notice mirrors post-commit (`scribe: relinked N record(s) after <kind>`); the re-entry guard is `SCRIBE_IN_POST_REWRITE`; lock timeout prints one line and exits 0 without writing.
 - I126 (Q3). Two amend tests encoded the old "stale link survives until manual relink" behaviour and now assert the relinked outcome.
 - I127 (Q3). Finding, not fixed: post-commit already fires per replayed commit during a non-conflicting rebase in this git version, which can leave backlink edits that conflict with a same-range commit touching docs/decisions; pre-existing, out of Q3 scope, candidate for a record.
+- I128 (review fix F1, worktree agent). Backslash continuations are joined with a single space, not removed outright; every segment goes through `collapse_whitespace` afterwards, so the result is the same and the regex simpler.
+- I129 (F1). A backslash-newline inside quotes counts as a continuation too: the gate only ever needs to widen a segment to catch more denylisted commands, never narrow one, so over-joining is the safe direction (said in the code comment above `LINE_CONTINUATION`).
+- I130 (F1). The rm-boundary regression guard passes on the old code as well (the old code treated every newline as a hard boundary for a different reason); kept as a preservation test, not claimed as a red test.
+- I131 (F1). No bare-CR continuation case: CRLF is covered by the regex, lone CR line endings are not a realistic tool payload.
