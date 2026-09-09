@@ -6,7 +6,7 @@ date: '2026-09-09'
 schema_version: 1
 task_refs: []
 review_state: unreviewed
-effective_state: proposed
+effective_state: implemented
 decided_by: agent-recommended
 recommended_by: claude-code
 ratified_by: null
@@ -23,7 +23,8 @@ affects:
 - {type: path, pattern: src/scribe/history_check.py}
 - {type: path, pattern: src/scribe/schema.py}
 - {type: path, pattern: src/scribe/check.py}
-implementation_links: []
+implementation_links:
+- {commit: 56af4b5423ca, paths: &id001 [src/scribe/check.py]}
 tags:
 - validation
 - history
@@ -40,6 +41,8 @@ supersedes: null
 relates_to: []
 history:
 - {at: '2026-09-09T20:27:31Z', event: proposed, by: claude-code, session: session_01A6tVoZuuWqu56QxEqtAjRw}
+- {at: '2026-09-09T21:42:46Z', event: link_added, by: scribe-post-commit, commit: 56af4b5423ca, field: implementation_links, old: [], new: [{commit: 56af4b5423ca, paths: *id001}]}
+- {at: '2026-09-09T21:42:46Z', event: implemented, by: scribe-post-commit, commit: 56af4b5423ca, field: effective_state, old: proposed, new: implemented}
 ---
 
 # History replay validation (every changed mutable field must be explained by an appended history entry) is deferred until the CI check has run on real branches for a few weeks
