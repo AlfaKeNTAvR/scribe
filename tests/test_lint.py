@@ -1,0 +1,612 @@
+"""T13: `scribe lint`, the store-wide pass (plan 4.12).
+
+One fixture per rule code: each test arranges the smallest store that triggers
+its rule once and asserts the code comes back. The last test is the acceptance
+clause from the task list: lint on this repository reports no `verify_failed`
+and no `verify_error`.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+import pytest
+from scribe import ulid
+from scribe.frontmatter import join, split
+from scribe.lint import STALE_PROPOSAL_DAYS, run_lint
+from scribe.record import Record
+from scribe.state import update_state
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TEMPLATE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "records" / "valid_minimal.md"
+).read_text(encoding="utf-8")
+# Fresh ULIDs, not the fixture's: the tmp repo carries the real RATIFICATIONS.jsonl,
+# and reusing an attested id would make every record read as state_behind_attestation.
+ULID_A = ulid.generate()
+ULID_B = ulid.generate()
+
+RunCli = Callable[..., tuple[int, str, str]]
+
+
+# --- helpers -----------------------------------------------------------------
+
+
+def git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def commit_all(repo: Path, message: str) -> str:
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", message)
+    return git(repo, "rev-parse", "HEAD")
+
+
+def days_ago(count: int) -> str:
+    return (datetime.now(timezone.utc).date() - timedelta(days=count)).isoformat()
+
+
+@pytest.fixture
+def lint_repo(tmp_repo: Path) -> Path:
+    """A tmp repo whose decision store is empty, so each test owns every record."""
+    for path in (tmp_repo / "docs" / "decisions").glob("D-*.md"):
+        path.unlink()
+    return tmp_repo
+
+
+def write_record(repo: Path, alias: str, record_id: str, **overrides: Any) -> Path:
+    """One valid record, dated today, with the given front-matter overrides."""
+    data, body = split(TEMPLATE)
+    data["alias"] = alias
+    data["id"] = record_id
+    data["date"] = days_ago(0)
+    data.update(overrides)
+    path = repo / "docs" / "decisions" / f"{alias}.md"
+    path.write_text(join(data, body), encoding="utf-8", newline="\n")
+    return path
+
+
+def lint(run_cli: RunCli, repo: Path, *args: str) -> tuple[int, list[dict[str, Any]]]:
+    code, stdout, _ = run_cli(["lint", "--json", *args], repo)
+    return code, json.loads(stdout)["findings"]
+
+
+def codes(findings: list[dict[str, Any]]) -> list[str]:
+    return [finding["code"] for finding in findings]
+
+
+def find(findings: list[dict[str, Any]], code: str) -> dict[str, Any]:
+    matched = [finding for finding in findings if finding["code"] == code]
+    assert matched, f"expected {code} in {codes(findings)}"
+    return matched[0]
+
+
+# --- a clean store ------------------------------------------------------------
+
+
+def test_a_clean_store_with_a_current_index_exits_zero(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+    assert run_cli(["index"], lint_repo)[0] == 0
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 0
+    assert findings == []
+
+
+# --- identity and validate rules ---------------------------------------------
+
+
+def test_two_records_sharing_an_id_report_duplicate_alias(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    shared = ULID_A
+    write_record(lint_repo, "D-260908-sound-choice", shared)
+    write_record(lint_repo, "D-260908-second-choice", shared)
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert "duplicate_alias" in codes(findings)
+
+
+def test_a_filename_that_does_not_match_the_alias_is_reported(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    path = write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+    path.rename(path.with_name("D-260908-other-name.md"))
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert "alias_filename_mismatch" in codes(findings)
+
+
+def test_an_unsupported_verify_engine_is_reported(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[
+            {
+                "id": "engine",
+                "engine": "jsonpath",
+                "pattern": "$.x",
+                "paths": ["src/x.py"],
+                "expect": "match",
+                "severity": "error",
+            }
+        ],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert "unsupported_engine" in codes(findings)
+
+
+# --- the git base rules -------------------------------------------------------
+
+
+def test_an_immutable_key_changed_since_the_base_is_reported(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    path = write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+    commit_all(lint_repo, "chore: Add the record")
+    (lint_repo / "src.py").write_text("value = 1\n", encoding="utf-8")
+    commit_all(lint_repo, "chore: Add unrelated code")
+    data, body = split(path.read_text(encoding="utf-8"))
+    data["tags"] = ["test", "rewritten"]
+    path.write_text(join(data, body), encoding="utf-8", newline="\n")
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert "immutable_changed" in codes(findings)
+
+
+def test_a_dropped_history_entry_reports_history_rewritten(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    path = write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        effective_state="implemented",
+        history=[
+            {"at": "2026-09-08T20:37:43Z", "event": "proposed", "by": "codex"},
+            {
+                "at": "2026-09-09T10:02:00Z",
+                "event": "implemented",
+                "by": "scribe-post-commit",
+                "field": "effective_state",
+                "old": "proposed",
+                "new": "implemented",
+            },
+        ],
+    )
+    commit_all(lint_repo, "chore: Add the record")
+    (lint_repo / "src.py").write_text("value = 1\n", encoding="utf-8")
+    commit_all(lint_repo, "chore: Add unrelated code")
+    data, body = split(path.read_text(encoding="utf-8"))
+    data["history"] = data["history"][:1]
+    path.write_text(join(data, body), encoding="utf-8", newline="\n")
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert "history_rewritten" in codes(findings)
+
+
+def test_an_unknown_base_ref_is_an_error(run_cli: RunCli, lint_repo: Path) -> None:
+    write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+
+    code, findings = lint(run_cli, lint_repo, "--base", "refs/heads/nowhere")
+
+    assert code == 1
+    assert "unknown_base" in codes(findings)
+
+
+# --- the index rule -----------------------------------------------------------
+
+
+def test_a_stale_index_is_an_error_and_fix_index_regenerates_it(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+
+    code, findings = lint(run_cli, lint_repo)
+    assert code == 1
+    assert find(findings, "index_stale")["severity"] == "error"
+
+    fixed_code, fixed_findings = lint(run_cli, lint_repo, "--fix-index")
+
+    assert fixed_code == 0
+    assert find(fixed_findings, "index_stale")["severity"] == "info"
+    assert lint(run_cli, lint_repo)[1] == []
+
+
+# --- lifecycle rules ----------------------------------------------------------
+
+
+def test_a_predecessor_that_ignores_its_edge_reports_effective_state_stale(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+    write_record(
+        lint_repo,
+        "D-260908-second-choice",
+        ULID_B,
+        supersedes="D-260908-sound-choice",
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    stale = find(findings, "effective_state_stale")
+    assert stale["severity"] == "warning"
+    assert stale["path"].endswith("D-260908-sound-choice.md")
+
+
+def test_superseded_without_an_edge_also_reports_effective_state_stale(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        effective_state="superseded",
+        history=[
+            {"at": "2026-09-08T20:37:43Z", "event": "proposed", "by": "codex"},
+            {
+                "at": "2026-09-09T10:02:00Z",
+                "event": "superseded",
+                "by": "scribe-new",
+                "field": "effective_state",
+                "old": "proposed",
+                "new": "superseded",
+            },
+        ],
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    assert "effective_state_stale" in codes(findings)
+
+
+def test_an_action_pattern_outside_the_denylist_reports_unknown_action(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        affects=[{"type": "action", "pattern": "deploy-to-mars"}],
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    unknown = find(findings, "unknown_action")
+    assert unknown["severity"] == "warning"
+    assert "deploy-to-mars" in unknown["message"]
+
+
+def test_a_rejected_record_that_is_still_implemented_is_flagged(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        review_state="rejected",
+        effective_state="implemented",
+        ratified_by="@nikita",
+        ratified_at="2026-09-09T10:02:00Z",
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    assert find(findings, "rejected_but_implemented")["severity"] == "warning"
+
+
+def test_a_review_date_in_the_past_reports_review_overdue(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        review=days_ago(1),
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    assert find(findings, "review_overdue")["severity"] == "warning"
+
+
+def test_an_implemented_record_nobody_reviewed_is_reported_as_info(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        effective_state="implemented",
+        history=[
+            {"at": "2026-09-08T20:37:43Z", "event": "proposed", "by": "codex"},
+            {
+                "at": "2026-09-09T10:02:00Z",
+                "event": "implemented",
+                "by": "scribe-post-commit",
+                "field": "effective_state",
+                "old": "proposed",
+                "new": "implemented",
+            },
+        ],
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    assert find(findings, "unreviewed_implemented")["severity"] == "info"
+
+
+def test_a_link_to_a_commit_outside_this_history_is_reported(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        implementation_links=[{"commit": "0123456789abcdef", "paths": ["src/x.py"]}],
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    unreachable = find(findings, "unreachable_link")
+    assert unreachable["severity"] == "warning"
+    assert "scribe relink" in unreachable["message"]
+
+
+# --- stale proposals and --expire ---------------------------------------------
+
+
+def test_an_old_unreviewed_proposal_reports_proposal_stale(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        date=days_ago(STALE_PROPOSAL_DAYS + 10),
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    assert find(findings, "proposal_stale")["severity"] == "warning"
+
+
+def test_expire_sets_expired_with_history_and_restores_the_predecessor(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    predecessor = write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        effective_state="superseded",
+        history=[
+            {"at": "2026-09-08T20:37:43Z", "event": "proposed", "by": "codex"},
+            {
+                "at": "2026-09-09T10:02:00Z",
+                "event": "superseded",
+                "by": "scribe-new",
+                "field": "effective_state",
+                "old": "proposed",
+                "new": "superseded",
+            },
+        ],
+    )
+    successor = write_record(
+        lint_repo,
+        "D-260908-second-choice",
+        ULID_B,
+        date=days_ago(40),
+        supersedes="D-260908-sound-choice",
+    )
+
+    _, findings = lint(run_cli, lint_repo, "--expire")
+
+    assert "proposal_stale" in codes(findings)
+    expired = Record.load(successor)
+    assert expired.data["effective_state"] == "expired"
+    assert expired.data["history"][-1] == {
+        **expired.data["history"][-1],
+        "event": "expired",
+        "by": "scribe-lint",
+        "field": "effective_state",
+        "old": "proposed",
+        "new": "expired",
+    }
+    restored = Record.load(predecessor)
+    assert restored.data["effective_state"] == "proposed"
+    assert restored.data["history"][-1]["event"] == "restored"
+    assert restored.data["history"][-1]["by"] == "scribe-lint"
+
+
+def test_expire_leaves_a_young_proposal_alone(run_cli: RunCli, lint_repo: Path) -> None:
+    path = write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        date=days_ago(0),
+    )
+
+    _, findings = lint(run_cli, lint_repo, "--expire")
+
+    assert "proposal_stale" not in codes(findings)
+    assert Record.load(path).data["effective_state"] == "proposed"
+
+
+# --- verify entries -----------------------------------------------------------
+
+
+def verify_entry(**overrides: Any) -> dict[str, Any]:
+    entry = {
+        "id": "code-says-so",
+        "engine": "grep",
+        "pattern": "SENTINEL",
+        "paths": ["src/x.py"],
+        "expect": "match",
+        "severity": "warning",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_a_verify_entry_whose_pattern_is_absent_reports_verify_failed(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    (lint_repo / "src").mkdir()
+    (lint_repo / "src" / "x.py").write_text("value = 1\n", encoding="utf-8")
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[verify_entry()],
+    )
+    assert run_cli(["index"], lint_repo)[0] == 0
+
+    code, findings = lint(run_cli, lint_repo)
+
+    failed = find(findings, "verify_failed")
+    assert failed["severity"] == "warning"
+    assert "src/x.py" in failed["message"]
+    assert code == 0
+
+
+def test_a_verify_entry_that_matches_reports_nothing(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    (lint_repo / "src").mkdir()
+    (lint_repo / "src" / "x.py").write_text("SENTINEL = 1\n", encoding="utf-8")
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[verify_entry()],
+    )
+    assert run_cli(["index"], lint_repo)[0] == 0
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 0
+    assert findings == []
+
+
+def test_a_verify_entry_whose_target_is_missing_reports_verify_failed(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[verify_entry(severity="error")],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "verify_failed")["severity"] == "error"
+
+
+def test_an_invalid_verify_regex_reports_verify_error(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    (lint_repo / "src").mkdir()
+    (lint_repo / "src" / "x.py").write_text("value = 1\n", encoding="utf-8")
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[verify_entry(pattern="[unclosed", severity="warning")],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "verify_error")["severity"] == "error"
+
+
+def test_a_no_match_verify_entry_fails_when_the_pattern_is_present(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    (lint_repo / "src").mkdir()
+    (lint_repo / "src" / "x.py").write_text("SENTINEL = 1\n", encoding="utf-8")
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[verify_entry(expect="no-match")],
+    )
+
+    _, findings = lint(run_cli, lint_repo)
+
+    assert "verify_failed" in codes(findings)
+
+
+# --- scratch state ------------------------------------------------------------
+
+
+def test_pending_ids_that_resolve_to_no_record_are_reported_and_pruned(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+    ghost = "01M21BVB05VVF1XV54Y66AWV6Z"
+
+    def seed(document: dict[str, Any]) -> None:
+        document["sessions"] = {
+            "session_test": {
+                "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "pending_decisions": [ghost, ULID_A],
+            }
+        }
+
+    update_state(lint_repo, seed)
+
+    _, findings = lint(run_cli, lint_repo)
+
+    pending = find(findings, "duplicate_pending")
+    assert pending["severity"] == "info"
+    assert ghost in pending["message"]
+
+    state = json.loads(
+        (lint_repo / ".claude" / "scribe" / "state.json").read_text(encoding="utf-8")
+    )
+    assert state["sessions"]["session_test"]["pending_decisions"] == [ULID_A]
+
+
+# --- acceptance on this repository --------------------------------------------
+
+
+def test_lint_on_this_repository_has_no_verify_failure() -> None:
+    _, findings, records = run_lint(PROJECT_ROOT)
+
+    assert records == 3
+    assert [
+        finding.render()
+        for finding in findings
+        if finding.code in {"verify_failed", "verify_error"}
+    ] == []

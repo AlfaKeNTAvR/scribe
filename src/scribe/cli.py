@@ -90,6 +90,43 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="the ref this branch is merging into, for example origin/main",
     )
+    lint_parser = subparsers.add_parser(
+        "lint",
+        help="store-wide rules over every decision record (plan 4.12)",
+    )
+    lint_parser.add_argument(
+        "--base",
+        help="ref the immutability rules compare against (default origin/main, else HEAD~1)",
+    )
+    lint_parser.add_argument(
+        "--expire",
+        action="store_true",
+        help="move proposals older than 30 days to expired",
+    )
+    lint_parser.add_argument(
+        "--fix-index",
+        action="store_true",
+        dest="fix_index",
+        help="regenerate INDEX.md instead of reporting index_stale",
+    )
+    lint_parser.add_argument("--json", action="store_true", dest="as_json")
+    init_parser = subparsers.add_parser(
+        "init",
+        help="install the git hook shims, config, deny rule and CI workflow (plan 5.5)",
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="replace hooks and workflows scribe did not write (hooks keep a .pre-scribe backup)",
+    )
+    init_parser.add_argument(
+        "--hooks-dir",
+        help="install the shims here instead of git rev-parse --git-path hooks",
+    )
+    init_parser.add_argument(
+        "--ci-source",
+        help="path or git+https URL CI installs scribe from; without it no workflow is written",
+    )
     hook_parser = subparsers.add_parser(
         "hook",
         help="run a Claude Code hook handler with the JSON payload on stdin",
@@ -271,6 +308,49 @@ def _check_command(args: argparse.Namespace) -> int:
     return code
 
 
+def _init_command(args: argparse.Namespace) -> int:
+    from scribe.init_repo import run_init
+
+    code, lines = run_init(
+        force=args.force, hooks_dir=args.hooks_dir, ci_source=args.ci_source
+    )
+    for line in lines:
+        print(line)
+    return code
+
+
+def _lint_command(args: argparse.Namespace) -> int:
+    from scribe.lint import run_lint
+
+    code, findings, records = run_lint(
+        base=args.base, expire=args.expire, fix_index=args.fix_index
+    )
+    counts = {
+        severity: sum(finding.severity == severity for finding in findings)
+        for severity in ("error", "warning", "info")
+    }
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "records": records,
+                    "errors": counts["error"],
+                    "warnings": counts["warning"],
+                    "info": counts["info"],
+                    "findings": [finding.__dict__ for finding in findings],
+                }
+            )
+        )
+        return code
+    for finding in findings:
+        print(finding.render())
+    print(
+        f"{records} records, {counts['error']} errors, "
+        f"{counts['warning']} warnings, {counts['info']} info"
+    )
+    return code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -290,6 +370,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _verdict_command(args)
     if args.command == "check":
         return _check_command(args)
+    if args.command == "init":
+        return _init_command(args)
+    if args.command == "lint":
+        return _lint_command(args)
     if args.command == "hook":
         from scribe.hooks.launcher import dispatch
 
