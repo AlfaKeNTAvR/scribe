@@ -110,7 +110,11 @@ project's settings source. None of this blocks a subprocess: an agent could
 run `scribe ratify` through Bash. In this release, human-only ratification is
 by construction of the skills (`/scribe:ratify` and `/scribe:reject` carry
 `disable-model-invocation: true`), not by proof; the attestation line records
-who ran the verdict and through which path (`via`).
+who ran the verdict and through which path (`via`). Do not add
+`Bash(*scribe ratify*)` deny rules to close the subprocess path: a skill's
+inline command goes through the same permission check as an agent's Bash
+call, so such a rule silences `/scribe:ratify` itself (verified live on
+2026-09-09, `docs/build/pipeline/step11_u2_test.sh`).
 
 ## Denylist
 
