@@ -4,7 +4,14 @@ Arguments: `<msg-file> [<source> [<sha>]]`. Candidates come from two origins,
 kept apart for logging and for F3: a staged record file carries its own id
 (`record-carried`), and a session's `pending_decisions` contributes an id when
 the staged content implements that record (`pending`). `addIfDifferent` keeps
-an amend from duplicating trailers (F14).
+an amend from duplicating trailers, but only when the new value is character
+for character equal to an existing one (F14). It does not notice that an
+alias-only trailer the author typed by hand already names the same record
+`add_trailer_to_file` is about to add as `alias ULID`, so both forms landed
+on 27aefbe. `already_trailed` resolves every existing `Decision:` trailer
+through the store (reusing `commit_msg.resolve_trailers`) before adding one,
+so a record already present under either form is skipped and the human's
+trailer is never rewritten.
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from pathlib import Path
 
 from scribe import gitutil
 from scribe.githooks import debug, repo_store
+from scribe.githooks.commit_msg import decision_values, resolve_trailers
 from scribe.links import STORE_PREFIX, implementation_paths
 from scribe.record import Record
 from scribe.state import load_state, parse_timestamp
@@ -97,6 +105,19 @@ def latest_session(root: Path) -> str | None:
     return best[1] if best else None
 
 
+def already_trailed(
+    store: Store, message_file: Path, root: Path, record_id: str
+) -> bool:
+    """True when an existing `Decision:` trailer already resolves to `record_id`.
+
+    Re-reads the message file so a trailer added earlier in the same `run`
+    call is seen too, not only trailers the author typed before the hook ran.
+    """
+    values = decision_values(message_file, root)
+    resolved, _findings = resolve_trailers(store, values)
+    return any(str(record.data.get("id")) == record_id for record in resolved)
+
+
 def has_session_trailer(message_file: Path, root: Path) -> bool:
     text = message_file.read_text(encoding="utf-8", errors="replace")
     return any(
@@ -119,7 +140,10 @@ def run(args: Sequence[str]) -> int:
     staged = staged_paths(root, source, sha)
     for record, origin in candidates(store, root, staged):
         alias = record.data.get("alias")
-        record_id = record.data.get("id")
+        record_id = str(record.data.get("id"))
+        if already_trailed(store, message_file, root, record_id):
+            debug(f"prepare-commit-msg: {origin} {alias} already trailed")
+            continue
         debug(f"prepare-commit-msg: {origin} {alias}")
         gitutil.add_trailer_to_file(
             message_file, DECISION_KEY, f"{alias} {record_id}", root

@@ -276,6 +276,46 @@ def test_pending_decisions_has_no_cap_and_all_survive_as_trailer_candidates(
     assert matched == set(ulids)
 
 
+def test_alias_only_trailer_already_naming_the_record_gets_no_second_trailer(
+    hooked_repo: Path,
+) -> None:
+    """27aefbe regression: a hand-typed alias-only trailer already names the
+    staged record, so `addIfDifferent`'s exact-text comparison used to miss it
+    and add a second `alias ULID` trailer for the same record. `already_trailed`
+    resolves the existing trailer through the store first and must not add a
+    second one, and must not rewrite the author's trailer either.
+    """
+    record = new_pending(hooked_repo, ["src/**"], "Hook test record")
+    alias = record.data["alias"]
+
+    commit(
+        hooked_repo, f"docs: Add the record\n\nDecision: {alias}\n", "docs/decisions"
+    )
+
+    message = head_message(hooked_repo)
+    assert trailer_lines(message, "Decision") == [f"Decision: {alias}"]
+
+
+def test_a_different_existing_alias_still_gets_the_pending_trailer_appended(
+    hooked_repo: Path,
+) -> None:
+    """The suppression above must not swallow an unrelated record: a trailer
+    naming a different, already-resolvable alias still gets the newly staged
+    record's own `alias ULID` trailer appended alongside it."""
+    record = new_pending(hooked_repo, ["src/**"], "Hook test record")
+    alias, ulid = record.data["alias"], record.data["id"]
+
+    commit(
+        hooked_repo, f"docs: Add the record\n\nDecision: {RECORD_C}\n", "docs/decisions"
+    )
+
+    message = head_message(hooked_repo)
+    assert trailer_lines(message, "Decision") == [
+        f"Decision: {RECORD_C}",
+        f"Decision: {alias} {ulid}",
+    ]
+
+
 def test_implementing_commit_links_from_pending_state(hooked_repo: Path) -> None:
     record = new_pending(hooked_repo, ["src/**"], "Hook test record")
     alias, ulid = record.data["alias"], record.data["id"]

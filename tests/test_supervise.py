@@ -173,10 +173,12 @@ def test_deliberate_deny_is_forwarded_without_the_marker(
     assert result.stderr.splitlines() == ["blocked: force push"]
 
 
-def test_traceback_marker_impersonation_is_fail_open(tmp_repo: Path, tmp_path: Path) -> None:
+def test_traceback_marker_impersonation_is_fail_open(
+    tmp_repo: Path, tmp_path: Path
+) -> None:
     fake_uv(
         tmp_path / "bin",
-        'echo "RuntimeError: [scribe-deny]" >&2\nexit 1\n',
+        'echo "[scribe-deny]" >&2\necho "[scribe-deny wrongtoken]" >&2\nexit 1\n',
     )
     result = supervise(
         ["hook", "gate"], tmp_repo, "{}", path=path_with(tmp_path / "bin", uv=False)
@@ -184,8 +186,12 @@ def test_traceback_marker_impersonation_is_fail_open(tmp_repo: Path, tmp_path: P
     assert result.returncode == 0
 
 
-@pytest.mark.parametrize("argv, expected", [(["hook", "gate"], 2), (["git-hook", "commit-msg"], 1)])
-def test_marker_forces_blocking_status(tmp_repo: Path, tmp_path: Path, argv: list[str], expected: int) -> None:
+@pytest.mark.parametrize(
+    "argv, expected", [(["hook", "gate"], 2), (["git-hook", "commit-msg"], 1)]
+)
+def test_marker_forces_blocking_status(
+    tmp_repo: Path, tmp_path: Path, argv: list[str], expected: int
+) -> None:
     fake_uv(
         tmp_path / "bin",
         f'echo "{protocol.DENY_MARKER} $SCRIBE_DENY_TOKEN]" >&2\nexit 0\n',

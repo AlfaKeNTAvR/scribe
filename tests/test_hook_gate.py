@@ -1,5 +1,7 @@
+import fcntl
 import json
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -8,7 +10,7 @@ from scribe import policy
 from scribe.hooks import pre_tool_use_gate, reconcile
 from scribe.hooks.launcher import POLICY_ADVISORY, POLICY_GATE
 from scribe.record import Record
-from scribe.state import load_state, session_entry, update_state
+from scribe.state import LOCK_FILE, load_state, session_entry, update_state
 from scribe.store import Store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -463,6 +465,31 @@ def test_exit_plan_mode_allows_with_pending_decision_but_still_flags(
     (entry,) = gate_log_lines(tmp_repo)
     assert entry["verdict"] == "allow"
     assert session_state(tmp_repo)["decision_worthy"]["areas"] == ["dependency"]
+
+
+def test_exit_plan_mode_allows_with_pending_decision_despite_held_state_lock(
+    run_hook: RunHook, tmp_repo: Path, set_config: SetConfig
+) -> None:
+    """P2 regression (3050f09): `plan_verdict` must read pending decisions from
+    the state `update_state` returns, not from the mutate closure that never
+    ran when the lock timed out. Held past LOCK_TIMEOUT_S so the hook process
+    genuinely times out acquiring the lock, same as an already-authorized
+    plan exit racing another scribe process.
+    """
+    set_config(tmp_repo, SCRIBE_GATES="enforce")
+    seed_session(tmp_repo, pending_decisions=["01M21BVB05VVF1XV54Y66AWV6E"])
+    lock_path = tmp_repo / ".claude" / "scribe" / LOCK_FILE
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        result = run_hook(
+            "gate", load_fixture("gate_exit_plan_mode.json", tmp_repo), tmp_repo
+        )
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+    assert elapsed < 5.0
+    assert result.returncode == 0
+    assert gate_log_lines(tmp_repo)[-1]["verdict"] == "allow"
 
 
 def test_exit_plan_mode_plain_plan_allows_without_flag(
