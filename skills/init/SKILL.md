@@ -2,7 +2,7 @@
 name: init
 description: "Human only: install the scribe git hooks, config, deny rule and CI workflow into this repository. The agent must never invoke this."
 disable-model-invocation: true
-argument-hint: [--force] [--ci-source <spec>]
+argument-hint: "[--force] [--ci-source <spec>]"
 allowed-tools: Bash(uv run --frozen --project ${CLAUDE_PLUGIN_ROOT} scribe *)
 ---
 
