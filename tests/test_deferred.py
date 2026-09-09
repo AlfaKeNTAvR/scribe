@@ -124,18 +124,20 @@ def test_two_worktree_supersede(tmp_repo: Path, run_cli, run_hook) -> None:
     commit(worktree_b, "docs: Propose Y on feat")
 
     cli(worktree_b, "index")
-    index = (worktree_b / "docs" / "decisions" / "INDEX.md").read_text(
-        encoding="utf-8"
-    )
+    index = (worktree_b / "docs" / "decisions" / "INDEX.md").read_text(encoding="utf-8")
     queue = index.split("## Review queue", 1)[1].split("## Active decisions", 1)[0]
-    assert next(line for line in queue.splitlines() if line.startswith("1. ")).startswith(
-        f"1. [supersedes ratified] {y_alias} |"
+    assert (
+        next(line for line in queue.splitlines() if line.startswith("### 1. "))
+        == f"### 1. {y_alias} [supersedes ratified]"
     )
     retired = index.split("## Retired", 1)[1]
-    assert f"{x_alias} | superseded by {y_alias}" in retired
-    assert Record.load(worktree_b / "docs" / "decisions" / x.path.name).data[
-        "effective_state"
-    ] == "superseded"
+    assert f"### {x_alias}\n- retired: superseded by {y_alias}" in retired
+    assert (
+        Record.load(worktree_b / "docs" / "decisions" / x.path.name).data[
+            "effective_state"
+        ]
+        == "superseded"
+    )
     code, stdout, stderr = run_cli(["check", "--base", "main"], worktree_b)
     assert code == 1, (stdout, stderr)
     assert f"{y_alias} supersedes ratified {x_alias}" in stdout

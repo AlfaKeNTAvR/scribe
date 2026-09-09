@@ -345,11 +345,11 @@ def test_new_with_supersedes_puts_the_record_first_in_the_review_queue(
     index = (session_state / "docs" / "decisions" / "INDEX.md").read_text(
         encoding="utf-8"
     )
-    first = [line for line in index.splitlines() if line.startswith("1. ")][0]
+    first = [line for line in index.splitlines() if line.startswith("### 1. ")][0]
 
     assert "[supersedes ratified]" in first
-    assert f"supersedes {PREDECESSOR}" in first
-    assert f"{PREDECESSOR} | superseded by " in index
+    assert f"- supersedes: {PREDECESSOR}" in index
+    assert f"### {PREDECESSOR}\n- retired: superseded by " in index
 
 
 def test_new_writes_nothing_when_the_record_does_not_validate(

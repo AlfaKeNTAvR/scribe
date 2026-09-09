@@ -8,6 +8,7 @@ import fcntl
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -415,7 +416,13 @@ def test_post_commit_retry_finishes_after_each_persistence_step(
     index = (hooked_repo / "docs" / "decisions" / "INDEX.md").read_text(
         encoding="utf-8"
     )
-    assert f"{alias} | implemented" in index
+    # Heading is "### <alias>" in Active decisions but "### <n>. <alias>" if the
+    # record is still unreviewed and sitting in the review queue instead.
+    assert re.search(
+        rf"^### (?:\d+\. )?{re.escape(alias)}.*\n- state: implemented,",
+        index,
+        re.MULTILINE,
+    )
     assert ulid not in pending_ids(hooked_repo)
     if failure_after in {"index", "pending"}:
         assert calls == 2

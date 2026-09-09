@@ -136,16 +136,27 @@ def fixture_store(tmp_path: Path) -> Store:
     return store
 
 
-def section_lines(text: str, heading: str) -> list[str]:
+def section_blocks(text: str, heading: str) -> list[list[str]]:
+    """Split a section's body into per-record blocks (heading line plus its
+    bullet lines), dropping the blank separator lines and the queue note."""
     lines = text.splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith(heading))
-    body = []
+    blocks: list[list[str]] = []
+    current: list[str] = []
     for line in lines[start + 1 :]:
         if line.startswith("## "):
             break
-        if line and not line.startswith("Ordered:"):
-            body.append(line)
-    return body
+        if line.startswith("### "):
+            if current:
+                blocks.append(current)
+            current = [line]
+        elif line == "":
+            continue
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append(current)
+    return blocks
 
 
 def test_header_counts_records(fixture_store: Store) -> None:
@@ -159,21 +170,25 @@ def test_review_queue_holds_every_unreviewed_record_in_group_order(
 ) -> None:
     text = render_index(fixture_store)
     assert "## Review queue (3)" in text
-    queue = section_lines(text, "## Review queue")
-    assert queue[0].startswith("1. [supersedes ratified] D-260910-supersedes-ratified")
-    assert "supersedes D-260901-ratified-predecessor" in queue[0]
-    assert queue[1].startswith("2. D-260909-implemented-unreviewed")
-    assert queue[2].startswith("3. D-260908-proposed-unreviewed")
-    assert "[supersedes ratified]" not in queue[1] + queue[2]
+    queue = section_blocks(text, "## Review queue")
+    assert queue[0][0] == "### 1. D-260910-supersedes-ratified [supersedes ratified]"
+    assert "- supersedes: D-260901-ratified-predecessor" in queue[0]
+    assert queue[1][0] == "### 2. D-260909-implemented-unreviewed"
+    assert queue[2][0] == "### 3. D-260908-proposed-unreviewed"
+    assert "[supersedes ratified]" not in queue[1][0] + queue[2][0]
 
 
-def test_queue_line_carries_states_affects_and_title(fixture_store: Store) -> None:
-    queue = section_lines(render_index(fixture_store), "## Review queue")
-    assert queue[0] == (
-        "1. [supersedes ratified] D-260910-supersedes-ratified | implemented | "
-        "unreviewed | agent | supersedes D-260901-ratified-predecessor | "
-        "src/scribe/index.py !tests/** | Title of D-260910-supersedes-ratified."
-    )
+def test_queue_block_carries_states_affects_and_title(fixture_store: Store) -> None:
+    queue = section_blocks(render_index(fixture_store), "## Review queue")
+    assert queue[0] == [
+        "### 1. D-260910-supersedes-ratified [supersedes ratified]",
+        "- supersedes: D-260901-ratified-predecessor",
+        "- state: implemented, unreviewed",
+        "- by: agent",
+        "- review: ",
+        "- title: Title of D-260910-supersedes-ratified",
+        "- affects: src/scribe/index.py, !tests/**",
+    ]
 
 
 def test_active_holds_only_effectively_attested_authority(
@@ -181,29 +196,34 @@ def test_active_holds_only_effectively_attested_authority(
 ) -> None:
     text = render_index(fixture_store)
     assert "## Active decisions (1)" in text
-    active = section_lines(text, "## Active decisions")
-    assert [line.split(" | ")[0] for line in active] == [
-        "D-260902-active-predecessor",
+    active = section_blocks(text, "## Active decisions")
+    assert [block[0] for block in active] == [
+        "### D-260902-active-predecessor",
     ]
 
 
 def test_rejected_successor_leaves_its_predecessor_active(
     fixture_store: Store,
 ) -> None:
-    active = section_lines(render_index(fixture_store), "## Active decisions")
+    active = section_blocks(render_index(fixture_store), "## Active decisions")
     predecessor = next(
-        line for line in active if line.startswith("D-260902-active-predecessor")
+        block for block in active if block[0] == "### D-260902-active-predecessor"
     )
-    assert predecessor == (
-        "D-260902-active-predecessor | implemented | ratified | human | "
-        "Title of D-260902-active-predecessor."
-    )
-    assert not any(line.startswith("D-260911-rejected-successor") for line in active)
+    assert predecessor == [
+        "### D-260902-active-predecessor",
+        "- state: implemented, ratified",
+        "- by: human",
+        "- review: ",
+        "- title: Title of D-260902-active-predecessor",
+    ]
+    assert not any(block[0] == "### D-260911-rejected-successor" for block in active)
 
 
 def test_unattested_record_is_not_active(fixture_store: Store) -> None:
-    active = section_lines(render_index(fixture_store), "## Active decisions")
-    assert not any("D-260908-proposed-unreviewed" in item for item in active)
+    active = section_blocks(render_index(fixture_store), "## Active decisions")
+    assert not any(
+        "D-260908-proposed-unreviewed" in line for block in active for line in block
+    )
 
 
 def test_retired_states_cover_edge_rejected_expired_and_stale(
@@ -211,15 +231,17 @@ def test_retired_states_cover_edge_rejected_expired_and_stale(
 ) -> None:
     text = render_index(fixture_store)
     assert "## Retired (4)" in text
-    retired = section_lines(text, "## Retired")
-    states = {line.split(" | ")[0]: line.split(" | ")[1] for line in retired}
+    retired = section_blocks(text, "## Retired")
+    states = {block[0][len("### ") :]: block[1] for block in retired}
     assert states == {
-        "D-260911-rejected-successor": "rejected",
-        "D-260904-stale-superseded": "superseded (stale)",
-        "D-260903-expired": "expired",
-        "D-260901-ratified-predecessor": ("superseded by D-260910-supersedes-ratified"),
+        "D-260911-rejected-successor": "- retired: rejected",
+        "D-260904-stale-superseded": "- retired: superseded (stale)",
+        "D-260903-expired": "- retired: expired",
+        "D-260901-ratified-predecessor": (
+            "- retired: superseded by D-260910-supersedes-ratified"
+        ),
     }
-    assert all("src/scribe" not in line for line in retired)
+    assert all(not line.startswith("- affects:") for block in retired for line in block)
 
 
 def test_backtracked_record_appears_in_retired_not_vanished(tmp_path: Path) -> None:
@@ -261,11 +283,101 @@ def test_backtracked_record_appears_in_retired_not_vanished(tmp_path: Path) -> N
     store = Store(tmp_path)
     text = render_index(store)
     assert "## Active decisions (0)" in text
-    retired = section_lines(text, "## Retired")
+    retired = section_blocks(text, "## Retired")
     assert retired == [
-        "D-260905-backtracked | backtracked | ratified | human | "
-        "Title of D-260905-backtracked."
+        [
+            "### D-260905-backtracked",
+            "- retired: backtracked",
+            "- state: backtracked, ratified",
+            "- by: human",
+            "- review: ",
+            "- title: Title of D-260905-backtracked",
+        ]
     ]
+
+
+def test_render_matches_the_format_c_heading_per_record_layout(
+    tmp_path: Path,
+) -> None:
+    """Pins the heading-per-record layout (format C, docs/build/13-index-preview-c.md):
+    one `### ` heading per record with one `- field:` bullet per line, blocks
+    separated by a single blank line. Fails on the old pipe-separated
+    one-line-per-record renderer, which never emits a `### ` heading at all.
+    """
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    write_fixture_record(
+        decisions,
+        "D-1-ratified-predecessor",
+        date="2026-01-01",
+        review_state="ratified",
+        effective_state="implemented",
+        decided_by="human",
+    )
+    write_fixture_record(
+        decisions,
+        "D-2-supersedes-ratified",
+        date="2026-01-02",
+        effective_state="implemented",
+        supersedes="D-1-ratified-predecessor",
+        affects=[{"type": "path", "pattern": "src/a.py"}],
+        regret_when="Something bad happens.",
+        review="2026-06-01",
+    )
+    write_fixture_record(
+        decisions,
+        "D-3-active",
+        date="2026-01-03",
+        review_state="ratified",
+        effective_state="implemented",
+        decided_by="human",
+    )
+    store = Store(tmp_path)
+    attestations = [
+        {
+            "id": record.data["id"],
+            "alias": record.data["alias"],
+            "verdict": "ratified",
+            "by": "@test",
+            "at": f"{record.data['date']}T00:00:00Z",
+            "via": "cli",
+            "body_sha256": record.body_sha256(),
+        }
+        for record in store.records()
+        if record.data.get("review_state") == "ratified"
+    ]
+    (decisions / "RATIFICATIONS.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in attestations), encoding="utf-8"
+    )
+    text = render_index(Store(tmp_path))
+    assert text == (
+        "# Decision index\n\n"
+        "Generated by `scribe index` from 3 records. Do not edit by hand.\n\n"
+        "## Review queue (1)\n\n"
+        "Ordered: records that supersede a ratified record first, then "
+        "implemented, then proposed; newest first within each group.\n\n"
+        "### 1. D-2-supersedes-ratified [supersedes ratified]\n"
+        "- supersedes: D-1-ratified-predecessor\n"
+        "- state: implemented, unreviewed\n"
+        "- by: agent\n"
+        "- review: 2026-06-01\n"
+        "- title: Title of D-2-supersedes-ratified\n"
+        "- affects: src/a.py\n"
+        "- regret: Something bad happens.\n\n"
+        "## Active decisions (1)\n\n"
+        "### D-3-active\n"
+        "- state: implemented, ratified\n"
+        "- by: human\n"
+        "- review: \n"
+        "- title: Title of D-3-active\n\n"
+        "## Retired (1)\n\n"
+        "### D-1-ratified-predecessor\n"
+        "- retired: superseded by D-2-supersedes-ratified\n"
+        "- state: implemented, ratified\n"
+        "- by: human\n"
+        "- review: \n"
+        "- title: Title of D-1-ratified-predecessor\n"
+    )
 
 
 def test_render_is_deterministic(fixture_store: Store) -> None:

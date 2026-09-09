@@ -365,7 +365,10 @@ def test_rejecting_the_successor_restores_the_predecessor(
     assert code == 0
     assert load(tmp_repo, RATIFIED_A).data["effective_state"] == "superseded"
     index = (decisions(tmp_repo) / "INDEX.md").read_text(encoding="utf-8")
-    assert f"{RATIFIED_A} | superseded by {successor}" in index.split("## Retired")[1]
+    assert (
+        f"### {RATIFIED_A}\n- retired: superseded by {successor}"
+        in index.split("## Retired")[1]
+    )
     hook = run_hook(
         "pre-tool-use-edit", edit_payload(tmp_repo, "src/scribe/index.py"), tmp_repo
     )
@@ -387,8 +390,8 @@ def test_rejecting_the_successor_restores_the_predecessor(
         "superseded",
         "proposed",
     )
-    assert f"{RATIFIED_A} | proposed | ratified" in active
-    assert f"{successor} | rejected" in retired
+    assert f"### {RATIFIED_A}\n- state: proposed, ratified" in active
+    assert f"### {successor}\n- retired: rejected" in retired
     assert validate(run_cli, tmp_repo) == (0, "4 records, 0 errors, 0 warnings\n")
 
     hook = run_hook(

@@ -69,7 +69,9 @@ considered, Decision, Consequences, Evidence, and an optional Attempted and
 failed section). The full field table, the immutable versus mutable key
 split, history entry shape, and the body rules are the plan, sections 3.1
 through 3.6. `docs/decisions/INDEX.md` (section 3.5) is generated, never
-hand-edited.
+hand-edited: one `### ` heading per record (numbered in the review queue,
+plain in Active decisions and Retired) followed by one `- field: value`
+bullet per line, so headings collapse cleanly in an editor's outline view.
 
 Never edit a record's body by hand after its first commit: the body is
 immutable, and every change to a mutable field (`review_state`,

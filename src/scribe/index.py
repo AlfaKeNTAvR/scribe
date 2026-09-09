@@ -36,23 +36,7 @@ def _affects_text(record: Record) -> str:
             continue
         prefix = "!" if item.get("negate") else ""
         patterns.append(f"{prefix}{item.get('pattern')}")
-    return " ".join(patterns)
-
-
-def _title_text(record: Record, with_tail: bool = True) -> str:
-    segments = [str(record.data.get("title") or "").strip()]
-    if with_tail:
-        regret = record.data.get("regret_when")
-        if regret:
-            segments.append(f"Regret: {str(regret).strip()}")
-        review = record.data.get("review")
-        if review:
-            segments.append(f"Review {review}")
-    return ". ".join(segment.rstrip(".") for segment in segments if segment) + "."
-
-
-def _join_fields(fields: list[str]) -> str:
-    return " | ".join(field for field in fields if field)
+    return ", ".join(patterns)
 
 
 def _queue_groups(store: Store, queue: list[Record]) -> list[tuple[Record, str]]:
@@ -82,44 +66,50 @@ def _queue_groups(store: Store, queue: list[Record]) -> list[tuple[Record, str]]
     return ordered
 
 
-def _queue_line(position: int, record: Record, predecessor: str) -> str:
-    marker = "[supersedes ratified] " if predecessor else ""
+def _record_fields(record: Record) -> list[str]:
+    """Standard bullet fields shared by every section: state, by, review, title,
+    affects (omitted when there are none), regret (omitted when empty)."""
     fields = [
-        str(record.data.get("alias") or ""),
-        str(record.data.get("effective_state") or ""),
-        str(record.data.get("review_state") or ""),
-        str(record.data.get("decided_by") or ""),
+        f"state: {record.data.get('effective_state') or ''}, "
+        f"{record.data.get('review_state') or ''}",
+        f"by: {record.data.get('decided_by') or ''}",
+        f"review: {record.data.get('review') or ''}",
+        f"title: {str(record.data.get('title') or '').strip()}",
     ]
+    affects = _affects_text(record)
+    if affects:
+        fields.append(f"affects: {affects}")
+    regret = record.data.get("regret_when")
+    if regret:
+        fields.append(f"regret: {str(regret).strip()}")
+    return fields
+
+
+def _record_block(heading: str, fields: list[str]) -> str:
+    lines = [heading]
+    lines.extend(f"- {field}" for field in fields)
+    return "\n".join(lines)
+
+
+def _queue_block(position: int, record: Record, predecessor: str) -> str:
+    alias = str(record.data.get("alias") or "")
+    marker = " [supersedes ratified]" if predecessor else ""
+    fields = _record_fields(record)
     if predecessor:
-        fields.append(f"supersedes {predecessor}")
-    fields.append(_affects_text(record))
-    fields.append(_title_text(record))
-    return f"{position}. {marker}{_join_fields(fields)}"
+        fields.insert(0, f"supersedes: {predecessor}")
+    return _record_block(f"### {position}. {alias}{marker}", fields)
 
 
-def _active_line(record: Record) -> str:
-    return _join_fields(
-        [
-            str(record.data.get("alias") or ""),
-            str(record.data.get("effective_state") or ""),
-            str(record.data.get("review_state") or ""),
-            str(record.data.get("decided_by") or ""),
-            _affects_text(record),
-            _title_text(record),
-        ]
-    )
+def _active_block(record: Record) -> str:
+    alias = str(record.data.get("alias") or "")
+    return _record_block(f"### {alias}", _record_fields(record))
 
 
-def _retired_line(record: Record, state: str) -> str:
-    return _join_fields(
-        [
-            str(record.data.get("alias") or ""),
-            state,
-            str(record.data.get("review_state") or ""),
-            str(record.data.get("decided_by") or ""),
-            _title_text(record, with_tail=False),
-        ]
-    )
+def _retired_block(record: Record, state: str) -> str:
+    alias = str(record.data.get("alias") or "")
+    fields = _record_fields(record)
+    fields.insert(0, f"retired: {state}")
+    return _record_block(f"### {alias}", fields)
 
 
 def _retired_state(record: Record, successor_alias: str) -> str | None:
@@ -155,35 +145,35 @@ def render_index(store: Store) -> str:
     queue = [
         record for record in records if record.data.get("review_state") == "unreviewed"
     ]
-    queue_lines = [
-        _queue_line(position, record, predecessor)
+    queue_blocks = [
+        _queue_block(position, record, predecessor)
         for position, (record, predecessor) in enumerate(_queue_groups(store, queue), 1)
     ]
 
-    active_lines = []
-    retired_lines = []
+    active_blocks = []
+    retired_blocks = []
     for record in _sort_newest_first(records):
         successor_alias = incoming.get(id(record), "")
         state = _retired_state(record, successor_alias)
         if state is not None:
-            retired_lines.append(_retired_line(record, state))
+            retired_blocks.append(_retired_block(record, state))
         elif store.effective_authority(record):
-            active_lines.append(_active_line(record))
+            active_blocks.append(_active_block(record))
 
     blocks = [
         HEADING,
         f"Generated by `scribe index` from {len(records)} records. Do not edit by hand.",
-        f"## Review queue ({len(queue_lines)})",
+        f"## Review queue ({len(queue_blocks)})",
         QUEUE_NOTE,
     ]
-    if queue_lines:
-        blocks.append("\n".join(queue_lines))
-    blocks.append(f"## Active decisions ({len(active_lines)})")
-    if active_lines:
-        blocks.append("\n".join(active_lines))
-    blocks.append(f"## Retired ({len(retired_lines)})")
-    if retired_lines:
-        blocks.append("\n".join(retired_lines))
+    if queue_blocks:
+        blocks.append("\n\n".join(queue_blocks))
+    blocks.append(f"## Active decisions ({len(active_blocks)})")
+    if active_blocks:
+        blocks.append("\n\n".join(active_blocks))
+    blocks.append(f"## Retired ({len(retired_blocks)})")
+    if retired_blocks:
+        blocks.append("\n\n".join(retired_blocks))
     return "\n\n".join(blocks) + "\n"
 
 
