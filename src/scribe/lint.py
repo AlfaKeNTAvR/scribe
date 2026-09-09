@@ -185,6 +185,7 @@ def _is_active(record: Record, retired: set[int]) -> bool:
 def _lifecycle_findings(store: Store, today: date) -> list[Finding]:
     """The state smells of plan 4.12 that need the whole store, not one record."""
     retired = {id(predecessor) for _, predecessor in store.effective_edges()}
+    history = gitutil.ReachableCommits(store.root)
     findings: list[Finding] = []
     for record in store.records():
         relative = _relative(store, record.path)
@@ -240,7 +241,7 @@ def _lifecycle_findings(store: Store, today: date) -> list[Finding]:
                     relative,
                 )
             )
-        findings.extend(_unreachable_link_findings(store, data, relative))
+        findings.extend(_unreachable_link_findings(history, data, relative))
     return findings
 
 
@@ -263,12 +264,12 @@ def _unknown_action_findings(data: dict[str, Any], relative: str) -> list[Findin
 
 
 def _unreachable_link_findings(
-    store: Store, data: dict[str, Any], relative: str
+    history: gitutil.ReachableCommits, data: dict[str, Any], relative: str
 ) -> list[Finding]:
     findings: list[Finding] = []
     for link in data.get("implementation_links") or []:
         commit = link.get("commit") if isinstance(link, dict) else None
-        if isinstance(commit, str) and not gitutil.commit_exists(commit, store.root):
+        if isinstance(commit, str) and history.resolve(commit) is None:
             findings.append(
                 Finding(
                     "warning",

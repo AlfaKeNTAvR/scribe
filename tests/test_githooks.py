@@ -12,7 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from scribe.links import implementation_paths
+from scribe.githooks import post_commit as post_commit_module
+from scribe.links import add_link, implementation_paths
 from scribe.newrecord import create_record, load_spec
 from scribe.record import Record
 from scribe.state import state_path
@@ -178,6 +179,29 @@ def record_then_implement(repo: Path) -> tuple[Record, str, str]:
     return record, record_sha, head(repo)
 
 
+def commit_implementation_without_post_commit(repo: Path) -> tuple[Record, str]:
+    """Create a pending record and an implementing HEAD whose hook has not run."""
+    record = new_pending(repo, ["src/**"], "Post-commit recovery record")
+    commit(repo, "docs: Add the record", "docs/decisions")
+    write(repo, "src/recovery.py")
+    commit(
+        repo,
+        f"feat: Recovery\n\nDecision: {record.data['alias']} {record.data['id']}\n",
+        "src/recovery.py",
+        env={"SCRIBE_SKIP_HOOKS": "1"},
+    )
+    return record, head(repo)
+
+
+def run_post_commit_direct() -> int:
+    """Invoke the process entrypoint without leaking its recursion guard."""
+    os.environ.pop(post_commit_module.GUARD_ENV, None)
+    try:
+        return post_commit_module.run([])
+    finally:
+        os.environ.pop(post_commit_module.GUARD_ENV, None)
+
+
 # --- links.implementation_paths ---------------------------------------------
 
 
@@ -251,6 +275,110 @@ def test_implementing_commit_links_from_pending_state(hooked_repo: Path) -> None
     status = git(hooked_repo, "status", "--porcelain").stdout
     assert f"docs/decisions/{alias}.md" in status
     assert "docs/decisions/INDEX.md" in status
+
+
+@pytest.mark.parametrize("failure_after", ["record", "index", "pending"])
+def test_post_commit_retry_finishes_after_each_persistence_step(
+    hooked_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_after: str,
+) -> None:
+    record, sha = commit_implementation_without_post_commit(hooked_repo)
+    alias = str(record.data["alias"])
+    ulid = str(record.data["id"])
+    monkeypatch.setattr(
+        post_commit_module,
+        "repo_store",
+        lambda: (hooked_repo, Store(hooked_repo)),
+    )
+    calls = 0
+
+    if failure_after == "record":
+        persist = Record.save
+
+        def fail_after_record(saved: Record) -> None:
+            nonlocal calls
+            persist(saved)
+            calls += 1
+            if calls == 1:
+                raise OSError("after record save")
+
+        monkeypatch.setattr(Record, "save", fail_after_record)
+    elif failure_after == "index":
+        persist = post_commit_module.write_index
+
+        def fail_after_index(current: Store):
+            nonlocal calls
+            result = persist(current)
+            calls += 1
+            if calls == 1:
+                raise OSError("after index write")
+            return result
+
+        monkeypatch.setattr(post_commit_module, "write_index", fail_after_index)
+    else:
+        persist = post_commit_module.consume_pending
+
+        def fail_after_pending(root: Path, ids: set[str]) -> None:
+            nonlocal calls
+            persist(root, ids)
+            calls += 1
+            if calls == 1:
+                raise OSError("after pending write")
+
+        monkeypatch.setattr(post_commit_module, "consume_pending", fail_after_pending)
+
+    with pytest.raises(OSError, match=f"after {failure_after}"):
+        run_post_commit_direct()
+
+    persisted = load(hooked_repo, alias)
+    assert persisted.data["effective_state"] == "implemented"
+    assert persisted.data["implementation_links"] == [
+        {"commit": sha[:12], "paths": ["src/recovery.py"]}
+    ]
+
+    assert run_post_commit_direct() == 0
+    healed = load(hooked_repo, alias)
+    assert healed.data["effective_state"] == "implemented"
+    assert len(healed.data["implementation_links"]) == 1
+    assert [item["event"] for item in healed.data["history"]].count("implemented") == 1
+    assert pending_ids(hooked_repo) == []
+    index = (hooked_repo / "docs" / "decisions" / "INDEX.md").read_text(
+        encoding="utf-8"
+    )
+    assert f"{alias} | implemented" in index
+    assert ulid not in pending_ids(hooked_repo)
+    if failure_after in {"index", "pending"}:
+        assert calls == 2
+
+
+def test_post_commit_saves_proposed_lifecycle_when_link_already_exists(
+    hooked_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, sha = commit_implementation_without_post_commit(hooked_repo)
+    alias = str(record.data["alias"])
+    assert add_link(
+        record,
+        sha,
+        ["src/recovery.py"],
+        "test",
+        "2026-09-09T12:00:00Z",
+    )
+    record.save()
+    assert load(hooked_repo, alias).data["effective_state"] == "proposed"
+
+    monkeypatch.setattr(
+        post_commit_module,
+        "repo_store",
+        lambda: (hooked_repo, Store(hooked_repo)),
+    )
+    assert run_post_commit_direct() == 0
+
+    saved = load(hooked_repo, alias)
+    assert saved.data["effective_state"] == "implemented"
+    assert len(saved.data["implementation_links"]) == 1
+    assert [item["event"] for item in saved.data["history"]].count("implemented") == 1
+    assert pending_ids(hooked_repo) == []
 
 
 # --- (c): unrelated staged file --------------------------------------------

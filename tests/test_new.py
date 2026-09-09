@@ -94,6 +94,37 @@ def test_new_inherits_task_refs_and_prompt_ids_from_state(
     assert record.data["provenance"]["session"] == "test-session"
 
 
+def test_new_preserves_explicit_empty_session_lists(
+    run_cli: RunCli, session_state: Path
+) -> None:
+    spec = json.loads(SPEC.read_text(encoding="utf-8"))
+    spec["task_refs"] = []
+    spec.setdefault("provenance", {})["prompt_ids"] = []
+    supplied = session_state / "empty-lists.json"
+    supplied.write_text(json.dumps(spec), encoding="utf-8")
+    code, stdout = run_new(run_cli, session_state, supplied)
+    assert code == 0, stdout
+    record = Record.load(session_state / stdout.strip())
+    assert record.data["task_refs"] == []
+    assert record.data["provenance"]["prompt_ids"] == []
+
+
+def test_new_preserves_literal_template_tokens_in_evidence(
+    run_cli: RunCli, tmp_repo: Path
+) -> None:
+    spec = json.loads(SPEC.read_text(encoding="utf-8"))
+    quote = "Keep {{EVIDENCE_POINTERS}} and {{DECISION}} verbatim."
+    spec["evidence_quote"] = quote
+    spec["evidence_pointers"] = ["A separate pointer"]
+    supplied = tmp_repo / "literal-tokens.json"
+    supplied.write_text(json.dumps(spec), encoding="utf-8")
+    code, stdout = run_new(run_cli, tmp_repo, supplied)
+    assert code == 0, stdout
+    body = Record.load(tmp_repo / stdout.strip()).body
+    assert f"> {quote}\n" in body
+    assert "- A separate pointer" in body
+
+
 def test_new_writes_one_proposed_history_entry(
     run_cli: RunCli, session_state: Path
 ) -> None:

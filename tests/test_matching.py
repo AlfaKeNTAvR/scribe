@@ -58,6 +58,43 @@ def test_to_repo_relative_normalizes_and_rejects_outside(tmp_path: Path) -> None
     assert to_repo_relative(root, tmp_path / "outside.py") is None
 
 
+def test_to_repo_relative_canonicalizes_symlinks_and_missing_targets(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "existing.py").touch()
+    checkout_link = tmp_path / "checkout-link"
+    checkout_link.symlink_to(root, target_is_directory=True)
+    assert (
+        to_repo_relative(root, checkout_link / "src" / "existing.py")
+        == "src/existing.py"
+    )
+    assert to_repo_relative(root, checkout_link / "src" / "new.py") == "src/new.py"
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "escaped").symlink_to(outside, target_is_directory=True)
+    assert to_repo_relative(root, root / "escaped" / "new.py") is None
+    nested_outside = outside / "nested"
+    nested_outside.mkdir()
+    (root / "nested-escape").symlink_to(nested_outside, target_is_directory=True)
+    assert to_repo_relative(root, root / "nested-escape" / ".." / "new.py") is None
+
+
+def test_to_repo_relative_treats_cross_drive_as_outside(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def cross_drive(_path: str, _start: str) -> str:
+        raise ValueError("path is on a different drive")
+
+    monkeypatch.setattr("scribe.matching.os.path.relpath", cross_drive)
+    assert to_repo_relative(root, root / "file.py") is None
+
+
 def test_windows_matching_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("scribe.matching.os.name", "nt")
     assert matches("SRC/**", "src/Package/File.PY")

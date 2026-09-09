@@ -181,8 +181,7 @@ def render_body(spec: dict[str, Any], title: str) -> str:
         "EVIDENCE_POINTERS": _pointer_lines(spec.get("evidence_pointers")),
     }
     text = TEMPLATE_PATH.read_text(encoding="utf-8")
-    for key, value in substitutions.items():
-        text = text.replace("{{" + key + "}}", value)
+    text = re.sub(r"\{\{([A-Z_]+)\}\}", lambda match: substitutions[match[1]], text)
     return "\n" + text
 
 
@@ -225,7 +224,7 @@ def build_front_matter(
         )
     if provenance["session"] is None:
         provenance["session"] = session
-    if not provenance["prompt_ids"]:
+    if not isinstance(supplied, dict) or "prompt_ids" not in supplied:
         provenance["prompt_ids"] = list(session_prompt_ids)
 
     values: dict[str, Any] = {
@@ -233,7 +232,7 @@ def build_front_matter(
         **{key: spec[key] for key in SPEC_FRONT_MATTER_KEYS if key in spec},
     }
     values["provenance"] = provenance
-    if not values["task_refs"]:
+    if "task_refs" not in spec:
         values["task_refs"] = list(session_task_refs)
 
     generated = {

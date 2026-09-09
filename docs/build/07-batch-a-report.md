@@ -29,3 +29,27 @@ fix: Close CI, gate and ratification validation gaps
 
 Align CI dependencies with implementation links and enforce immutable body content. Honor lock failures, preserve attested recovery values, check every command rule and quote CI source paths.
 ```
+
+## Group 2
+
+Completed V15, V16, V18, V19 template and explicit empty lists, and V20. Decisions: I80-I84. The pending-decision cap is unchanged.
+
+Files changed: src/scribe/matching.py, src/scribe/hooks/pre_tool_use_edit.py, src/scribe/githooks/post_commit.py, src/scribe/newrecord.py, src/scribe/gitutil.py, src/scribe/relink.py, src/scribe/lint.py, src/scribe/lookup.py; tests/test_matching.py, tests/test_hook_injection.py, tests/test_githooks.py, tests/test_new.py, tests/test_relink.py; AUTONOMOUS_DECISIONS_09_08_2026.md and this report.
+
+Regression tests added, with the assertion that fails on the old code:
+
+- V15: test_to_repo_relative_canonicalizes_symlinks_and_missing_targets requires both existing and new files through a checkout symlink to resolve inside, and escaping symlinks including symlink/.. to resolve outside; old code misclassified them. test_to_repo_relative_treats_cross_drive_as_outside requires None instead of a relpath ValueError.
+- V16: test_post_commit_retry_finishes_after_each_persistence_step (record, index, pending) reloads the store after an injected post-write failure. It requires completed index and pending cleanup, with index/pending spies called again on retry; old code returned early once links existed. test_post_commit_saves_proposed_lifecycle_when_link_already_exists requires implemented to persist; old code changed it only in memory.
+- V18: test_large_record_body_is_not_decoded_by_injection requires a matching record with a 1 MB undecodable body to remain injectable; old full-file decoding skipped it. test_deadline_is_checked_after_matching_and_formatting requires no output after simulated expensive formatting; old code emitted. test_block_truncates_long_target_without_losing_footer_or_links requires the complete footer and record link after target truncation; old whole-block truncation lost them. Existing line-cap coverage also checks limits shorter than the ellipsis.
+- V19: test_new_preserves_explicit_empty_session_lists requires both lists to remain empty despite session defaults; old code filled them. test_new_preserves_literal_template_tokens_in_evidence requires the exact quoted token text in the saved body; old repeated replacement altered EVIDENCE_POINTERS inside evidence.
+- V20: test_lookup_lint_and_relink_agree_on_existing_unreachable_commit creates a real amended-away object and verifies that it still exists. Lookup must mark its abbreviated link, lint must warn for exactly that link, and relink must retain only the reachable implementation. Old lookup omitted the warning. The test also requires exactly one reachable-history scan per command and accepts reachable seven-character abbreviations.
+
+Suite: UV_CACHE_DIR=/tmp/scribe-uv-cache UV_OFFLINE=1 uv run pytest -q -> 373 passed, 3 skipped. Warm injection median 0.510 s; bytecode-cold 0.644 s. git diff --check passed.
+
+Incremental commit patch: /tmp/scribe-batch-a-commits/group-2.patch.
+
+```text
+fix: Recover post-commit work and preserve retrieval inputs
+
+Finish interrupted backlink cleanup and keep injection within its path and time boundaries. Preserve explicit record inputs and make lookup, lint and relink share reachable commit checks.
+```

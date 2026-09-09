@@ -29,14 +29,14 @@ def _commit_matches(record: Record, tokens: list[str]) -> bool:
 
 
 def _implementing_commits(
-    store: Store, root: Path
+    store: Store, root: Path, history: gitutil.ReachableCommits
 ) -> dict[str, list[tuple[str, list[str]]]]:
     """record id -> [(full sha, paths)] for every reachable commit that implements it.
 
     Newest first, following `git rev-list --all`.
     """
     by_record: dict[str, list[tuple[str, list[str]]]] = {}
-    for sha in gitutil.rev_list_all(root):
+    for sha in history.commits:
         tokens = trailer_tokens(gitutil.commit_trailer_values(sha, TRAILER_KEY, root))
         if not tokens:
             continue
@@ -55,7 +55,7 @@ def _implementing_commits(
 
 def _rebuild_links(
     record: Record,
-    reachable: set[str],
+    reachable: gitutil.ReachableCommits,
     matches: list[tuple[str, list[str]]],
     root: Path,
 ) -> list[dict[str, object]]:
@@ -68,7 +68,7 @@ def _rebuild_links(
     kept: dict[str, list[str]] = {}
     for link in old_links:
         commit = str(link.get("commit") or "")
-        full = next((sha for sha in reachable if sha.startswith(commit)), None)
+        full = reachable.resolve(commit)
         if full is None:
             continue
         paths = implementation_paths(record, gitutil.commit_changed_paths(full, root))
@@ -76,9 +76,7 @@ def _rebuild_links(
             kept[short_sha(full)] = paths
     for sha, paths in reversed(matches):
         kept.setdefault(short_sha(sha), paths)
-    order = [short_sha(str(link.get("commit") or "")) for link in old_links]
-    order += [key for key in kept if key not in order]
-    return [{"commit": key, "paths": kept[key]} for key in order if key in kept]
+    return [{"commit": key, "paths": paths} for key, paths in kept.items()]
 
 
 def run_relink(start: str | Path = ".") -> tuple[int, list[str]]:
@@ -90,8 +88,8 @@ def run_relink(start: str | Path = ".") -> tuple[int, list[str]]:
     if store is None or not store.path.is_dir():
         return 1, ["no decision store found (docs/decisions)"]
 
-    reachable = set(gitutil.rev_list_all(root))
-    matches = _implementing_commits(store, root)
+    reachable = gitutil.ReachableCommits(root)
+    matches = _implementing_commits(store, root, reachable)
     now = utc_now()
     changed_records: list[Record] = []
     lines: list[str] = []

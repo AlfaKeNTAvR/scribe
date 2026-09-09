@@ -99,6 +99,25 @@ def rev_list_all(cwd: str | Path = ".") -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+class ReachableCommits:
+    """One command's reachable history snapshot, including abbreviation resolution."""
+
+    def __init__(self, cwd: str | Path = ".") -> None:
+        self.cwd = cwd
+        self.commits = rev_list_all(cwd)
+        self._reachable = set(self.commits)
+        self._resolved: dict[str, str | None] = {}
+
+    def resolve(self, value: str) -> str | None:
+        """Full SHA only when the commit resolves and is reachable from a ref."""
+        if value in self._reachable:
+            return value
+        if value not in self._resolved:
+            full = rev_parse_commit(value, self.cwd)
+            self._resolved[value] = full if full in self._reachable else None
+        return self._resolved[value]
+
+
 def log_grep_all(
     patterns: list[str],
     cwd: str | Path = ".",

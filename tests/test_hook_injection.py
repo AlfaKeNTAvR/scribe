@@ -14,6 +14,7 @@ from scribe.hooks.pre_tool_use_edit import (
     governing_records,
     handle,
     record_line,
+    truncate,
 )
 from scribe.record import Record
 from scribe.state import error_log_path
@@ -311,6 +312,7 @@ def test_record_line_shape_and_caps() -> None:
     assert record_line(mapping, set()) == (
         "- D-260908-x (proposed, ratified by human): A title."
     )
+    assert truncate("long", 2) == ".."
 
 
 def test_block_drops_records_to_fit_cap() -> None:
@@ -336,6 +338,20 @@ def test_block_drops_records_to_fit_cap() -> None:
     assert block.splitlines()[-1].startswith(CANDIDATES_SENTENCE)
 
 
+def test_block_truncates_long_target_without_losing_footer_or_links() -> None:
+    record = {
+        "alias": "D-260908-x",
+        "effective_state": "proposed",
+        "review_state": "unreviewed",
+        "title": "A title",
+    }
+    block = format_block("nested/" + "x" * 2000, [record], [record])
+    assert len(block) <= MAX_BLOCK_CHARS
+    assert block.splitlines()[0].endswith("...:")
+    assert block.splitlines()[-1].startswith(CANDIDATES_SENTENCE)
+    assert "Full text: docs/decisions/D-260908-x.md" in block
+
+
 # --- robustness -------------------------------------------------------------------
 
 
@@ -350,6 +366,18 @@ def test_unparsable_record_is_skipped_and_logged(tmp_repo: Path) -> None:
     assert INDEX_RECORD in context
     log = error_log_path(tmp_repo).read_text(encoding="utf-8")
     assert "scribe: skipped D-260909-broken.md" in log
+
+
+def test_large_record_body_is_not_decoded_by_injection(tmp_repo: Path) -> None:
+    record_path = tmp_repo / "docs" / "decisions" / f"{INDEX_RECORD}.md"
+    front_matter = record_path.read_bytes().split(b"\n---\n", 1)[0] + b"\n---\n"
+    record_path.write_bytes(front_matter + b"\xff" * 1_000_000)
+
+    context = context_of(
+        handle(edit_payload(tmp_repo, tmp_repo / "src" / "scribe" / "index.py"))
+    )
+
+    assert INDEX_RECORD in context
 
 
 def test_expired_deadline_prints_nothing(
@@ -377,3 +405,21 @@ def test_deadline_is_checked_while_loading(
     monkeypatch.setattr(pre_tool_use_edit, "deadline_passed", counting)
     assert handle(edit_payload(tmp_repo, tmp_repo / "src/scribe/index.py")) is not None
     assert len(checks) >= 2
+
+
+def test_deadline_is_checked_after_matching_and_formatting(
+    tmp_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_format = pre_tool_use_edit.format_block
+
+    def expensive_format(*args: object, **kwargs: object) -> str:
+        block = real_format(*args, **kwargs)
+        monkeypatch.setattr(
+            pre_tool_use_edit,
+            "_START",
+            time.monotonic() - pre_tool_use_edit.DEADLINE_S - 0.1,
+        )
+        return block
+
+    monkeypatch.setattr(pre_tool_use_edit, "format_block", expensive_format)
+    assert handle(edit_payload(tmp_repo, tmp_repo / "src/scribe/index.py")) is None

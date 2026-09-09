@@ -84,15 +84,19 @@ def matches_affects(affects: Iterable[Mapping[str, Any]], path: str) -> bool:
 
 def to_repo_relative(root: str | Path, path: str | Path) -> str | None:
     """Return a normalized repository-relative path, or None when outside."""
-    root_text = os.path.abspath(os.fspath(root))
+    root_text = os.path.realpath(os.fspath(root))
     path_text = os.fspath(path).replace("\\", os.sep)
     if not os.path.isabs(path_text):
         path_text = os.path.join(root_text, path_text)
-    path_text = os.path.abspath(path_text)
+    path_text = os.path.realpath(path_text)
     if os.name == "nt":
         root_text = root_text.lower()
         path_text = path_text.lower()
-    relative = os.path.relpath(path_text, root_text)
+    try:
+        relative = os.path.relpath(path_text, root_text)
+    except ValueError:
+        # Windows raises for paths on different drives. Such a target is outside.
+        return None
     relative = relative.replace("\\", "/")
     if relative == ".." or relative.startswith("../"):
         return None

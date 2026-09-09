@@ -13,6 +13,7 @@ and leaves exactly the reachable commits linked, belongs here.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -162,3 +163,51 @@ def test_relink_drops_the_stale_sha_after_amend(
     relinked_after = sum(item["event"] == "relinked" for item in after.data["history"])
     assert relinked_after - relinked_before == 1
     assert after.data["effective_state"] == "implemented"
+
+
+def test_lookup_lint_and_relink_agree_on_existing_unreachable_commit(
+    repo_with_record: tuple[Path, Record], run_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scribe import gitutil
+
+    repo, record = repo_with_record
+    alias = record.data["alias"]
+    write(repo, "src/x.py")
+    old_sha = commit(repo, "feat: Implement x", "src/x.py", decision=alias)
+    git(repo, "commit", "-q", "--amend", "--no-edit", env=AMEND_LATER)
+    new_sha = head(repo)
+    assert new_sha != old_sha
+    assert gitutil.commit_exists(old_sha, repo)
+    assert old_sha not in gitutil.rev_list_all(repo)
+    record.data["implementation_links"] = [
+        {"commit": old_sha[:7], "paths": ["src/x.py"]},
+        {"commit": new_sha[:7], "paths": ["src/x.py"]},
+    ]
+    record.save()
+    original = gitutil.rev_list_all
+    scans = []
+
+    def counted(root):
+        scans.append(root)
+        return original(root)
+
+    monkeypatch.setattr(gitutil, "rev_list_all", counted)
+    code, stdout, _ = run_cli(["lookup", alias], repo)
+    assert code == 0
+    assert f"{old_sha[:7]} src/x.py (not in this history)" in stdout
+    assert f"  {new_sha[:7]} src/x.py" in stdout.splitlines()
+    assert len(scans) == 1
+
+    scans.clear()
+    _, stdout, _ = run_cli(["lint", "--json"], repo)
+    findings = json.loads(stdout)["findings"]
+    unreachable = [item for item in findings if item["code"] == "unreachable_link"]
+    assert len(unreachable) == 1
+    assert old_sha[:7] in unreachable[0]["message"]
+    assert len(scans) == 1
+
+    scans.clear()
+    code, stdout, _ = run_cli(["relink"], repo)
+    assert code == 0, stdout
+    assert link_commits(load(repo, alias)) == {new_sha[:12]}
+    assert len(scans) == 1

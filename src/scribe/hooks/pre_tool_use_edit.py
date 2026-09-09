@@ -73,7 +73,13 @@ def load_front_matters(store: Store) -> list[dict[str, Any]] | None:
         if count % DEADLINE_CHECK_EVERY == 0 and deadline_passed():
             return None
         try:
-            mapping, _ = split(path.read_text(encoding="utf-8"))
+            lines: list[bytes] = []
+            with path.open("rb") as handle:
+                for line in handle:
+                    lines.append(line)
+                    if len(lines) > 1 and line.rstrip(b"\r\n") == b"---":
+                        break
+            mapping, _ = split(b"".join(lines).decode("utf-8"))
         except (OSError, ValueError) as exc:
             log_hook_error(store.root, f"scribe: skipped {path.name}: {exc}")
             continue
@@ -147,7 +153,9 @@ def _descending_text_key(value: Any) -> str:
 def truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
-    return text[: max(limit - len(ELLIPSIS), 0)] + ELLIPSIS
+    if limit <= len(ELLIPSIS):
+        return ELLIPSIS[:limit]
+    return text[: limit - len(ELLIPSIS)] + ELLIPSIS
 
 
 def record_line(mapping: dict[str, Any], ratified_keys: set[str]) -> str:
@@ -174,7 +182,7 @@ def format_block(
     records: list[dict[str, Any]],
     mappings: list[dict[str, Any]],
 ) -> str:
-    """Assemble the advisory block, dropping trailing records to fit MAX_BLOCK_CHARS."""
+    """Assemble the capped advisory block, preserving its footer and record links."""
     ratified_keys = {
         key
         for mapping in mappings
@@ -184,13 +192,15 @@ def format_block(
     }
     shown = list(records)
     while shown:
-        lines = [f"Governing decisions for {relative_path}:"]
-        lines.extend(record_line(mapping, ratified_keys) for mapping in shown)
+        record_lines = [record_line(mapping, ratified_keys) for mapping in shown]
         full_text = " ".join(f"docs/decisions/{m.get('alias')}.md" for m in shown)
-        lines.append(f"{FOOTER} Full text: {full_text}")
-        block = "\n".join(lines)
-        if len(block) <= MAX_BLOCK_CHARS or len(shown) == 1:
-            return truncate(block, MAX_BLOCK_CHARS)
+        footer = f"{FOOTER} Full text: {full_text}"
+        trailing = "\n".join([*record_lines, footer])
+        header_fixed = len("Governing decisions for :\n")
+        path_limit = MAX_BLOCK_CHARS - header_fixed - len(trailing)
+        if path_limit >= 0:
+            shown_path = truncate(relative_path, path_limit)
+            return f"Governing decisions for {shown_path}:\n{trailing}"
         shown.pop()
     return ""
 
@@ -212,9 +222,12 @@ def handle(payload: dict[str, Any]) -> dict[str, Any] | None:
     records = governing_records(mappings, relative_path)
     if not records:
         return None
+    block = format_block(relative_path, records, mappings)
+    if not block or deadline_passed():
+        return None
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "additionalContext": format_block(relative_path, records, mappings),
+            "additionalContext": block,
         }
     }

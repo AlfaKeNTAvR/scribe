@@ -82,12 +82,13 @@ def commits_for_record(record: Record, store: Store) -> list[tuple[str, str]]:
 
 def format_links(record: Record, store: Store) -> list[str]:
     lines: list[str] = []
+    history = gitutil.ReachableCommits(store.root)
     for link in record.data.get("implementation_links") or []:
         if not isinstance(link, dict):
             continue
         commit = str(link.get("commit", "?"))
         paths = " ".join(str(item) for item in (link.get("paths") or []))
-        reachable = gitutil.commit_exists(commit, store.root)
+        reachable = history.resolve(commit) is not None
         suffix = "" if reachable else " (not in this history)"
         lines.append(f"  {commit} {paths}{suffix}".rstrip())
     return lines

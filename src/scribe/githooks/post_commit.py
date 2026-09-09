@@ -76,22 +76,31 @@ def run(args: Sequence[str]) -> int:
     changed = gitutil.commit_changed_paths("HEAD", root)
     now = utc_now()
     linked: list[Record] = []
+    implemented: list[Record] = []
+    changed_records: list[Record] = []
     for record in referenced_records(store, root):
         paths = implementation_paths(record, changed)
         if not paths:
             continue
+        implemented.append(record)
+        record_changed = False
         if add_link(record, sha, paths, BY, now):
             linked.append(record)
-        mark_implemented(record, sha, BY, now)
-    if not linked:
+            record_changed = True
+        if mark_implemented(record, sha, BY, now):
+            record_changed = True
+        if record_changed:
+            changed_records.append(record)
+    if not implemented:
         return 0
-    for record in linked:
+    for record in changed_records:
         record.save()
     write_index(store)
-    consume_pending(root, {str(record.data.get("id")) for record in linked})
-    print(
-        f"scribe: linked {len(linked)} record(s) to {short_sha(sha)}; "
-        "run git add docs/decisions to include the backlinks in your next commit",
-        file=sys.stderr,
-    )
+    consume_pending(root, {str(record.data.get("id")) for record in implemented})
+    if linked:
+        print(
+            f"scribe: linked {len(linked)} record(s) to {short_sha(sha)}; "
+            "run git add docs/decisions to include the backlinks in your next commit",
+            file=sys.stderr,
+        )
     return 0
