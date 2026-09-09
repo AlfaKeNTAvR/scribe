@@ -81,6 +81,7 @@ def seed_session(root: Path, **fields: object) -> None:
         ("rm -rf /tmp/scratch", "rm-rf-outside-worktree"),
         ("rm -fr ~/scratch", "rm-rf-outside-worktree"),
         ("rm -r -f ../sibling", "rm-rf-outside-worktree"),
+        ("rm -rf build /tmp/other", "rm-rf-outside-worktree"),
         ("sudo rm -rf --no-preserve-root /", "rm-rf-outside-worktree"),
         ("alembic upgrade head", "alembic-migrate"),
         ("npx prisma migrate deploy", "prisma-migrate-deploy"),
@@ -237,6 +238,23 @@ def test_ratified_record_for_another_action_does_not_allow(
         "gate", load_fixture("gate_bash_force_push.json", tmp_repo), tmp_repo
     )
     assert result.returncode == 2
+
+
+def test_compound_command_denies_when_only_one_matched_rule_is_ratified(
+    run_hook: RunHook, tmp_repo: Path, set_config: SetConfig
+) -> None:
+    set_config(tmp_repo, SCRIBE_GATES="enforce")
+    write_ratified_action_record(tmp_repo, "git-push-force")
+    payload = load_fixture("gate_bash_force_push.json", tmp_repo)
+    payload["tool_input"]["command"] = "git push --force origin main && npm publish"
+
+    result = run_hook("gate", payload, tmp_repo)
+
+    assert result.returncode == 2
+    assert "'npm-publish' is on the irreversible-action denylist" in result.stderr
+    (entry,) = gate_log_lines(tmp_repo)
+    assert entry["matched_rules"] == ["git-push-force", "npm-publish"]
+    assert entry["uncovered_rules"] == ["npm-publish"]
 
 
 def test_unratified_or_two_way_door_action_record_does_not_allow(

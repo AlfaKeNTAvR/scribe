@@ -19,7 +19,7 @@ from .history_check import (
     check_records_against_base,
 )
 from .index import check_index
-from .matching import matches_affects
+from .links import implementation_paths
 from .record import Record
 from .schema import validate_record
 from .store import Store
@@ -77,8 +77,7 @@ def _supersede_gate(
             continue
         alias = str(record.data.get("alias") or "")
         introduced = _relative_to_root(store, record.path) in changed
-        affects = record.data.get("affects") or []
-        depended_on = any(matches_affects(affects, path) for path in changed_paths)
+        depended_on = bool(implementation_paths(record, changed_paths))
         trailered = alias in trailer_tokens or record.data.get("id") in trailer_tokens
         if introduced or depended_on or trailered:
             reasons.append(

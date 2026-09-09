@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -94,7 +95,7 @@ def check_command(spec: str) -> tuple[str, str | None]:
         f"scribe: warning: --ci-source {spec} is a filesystem path; the workflow "
         "only works where that path exists"
     )
-    return f"uv run --frozen --project {spec} scribe check", warning
+    return f"uv run --frozen --project {shlex.quote(spec)} scribe check", warning
 
 
 def render_workflow(spec: str) -> tuple[str, str | None]:

@@ -118,8 +118,9 @@ def _unlock(handle: IO[str]) -> None:
 def locked(lock_path: str | Path) -> Iterator[bool]:
     """Hold the state lock for the block; yield False when the lock timed out.
 
-    Retries every LOCK_RETRY_INTERVAL_S for LOCK_TIMEOUT_S, then proceeds
-    without the lock and logs `state lock timeout` next to the lock file.
+    Retries every LOCK_RETRY_INTERVAL_S for LOCK_TIMEOUT_S, then yields False
+    and logs `state lock timeout` next to the lock file. Callers must not write
+    when the lock was not acquired.
     """
     path = Path(lock_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,8 +187,10 @@ def update_state(
     mutate: Callable[[dict[str, Any]], None],
     now: str | None = None,
 ) -> dict[str, Any]:
-    """Locked read-modify-write of state.json; returns the written state."""
-    with locked(state_dir(root) / LOCK_FILE):
+    """Locked read-modify-write; on lock timeout, drop the update."""
+    with locked(state_dir(root) / LOCK_FILE) as acquired:
+        if not acquired:
+            return load_state(root)
         state = load_state(root)
         mutate(state)
         prune_sessions(state, now or utc_now())

@@ -60,15 +60,22 @@ def action_is_ratified(store: Store, rule_name: str) -> bool:
 
 def command_verdict(store: Store, tool: str, command: str) -> Verdict:
     """Deny a denylisted command unless a ratified one-way-door record allows it."""
+    matched_rules = policy.matching_rules(command)
+    uncovered_rules = [
+        rule_name
+        for rule_name in matched_rules
+        if not action_is_ratified(store, rule_name)
+    ]
     event = {
         "event": "gate_verdict",
         "tool": tool,
         "command_head": command[:COMMAND_HEAD_CHARS],
+        "matched_rules": matched_rules,
+        "uncovered_rules": uncovered_rules,
     }
-    rule_name = policy.denied_rule(command)
-    if rule_name is None or action_is_ratified(store, rule_name):
+    if not uncovered_rules:
         return Verdict(True, "", event)
-    return Verdict(False, DENYLIST_REASON.format(name=rule_name), event)
+    return Verdict(False, DENYLIST_REASON.format(name=uncovered_rules[0]), event)
 
 
 def plan_verdict(

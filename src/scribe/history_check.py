@@ -64,7 +64,7 @@ def compare_record_versions(base_text: str, head_text: str) -> list[Problem]:
                     f"immutable key changed since the base: {key}",
                 )
             )
-    if base_body.rstrip() != head_body.rstrip():
+    if base_body != head_body:
         problems.append(
             Problem(
                 "error", "immutable_changed", "the record body changed since the base"

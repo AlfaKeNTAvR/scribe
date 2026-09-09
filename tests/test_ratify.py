@@ -1,10 +1,13 @@
 """T9: `scribe ratify` and `scribe reject` (plan 3.8 matrix, 4.10 order, F1/F5/F7/F8)."""
 
+import fcntl
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -244,24 +247,110 @@ def test_hand_edited_ratified_state_is_unattested(
     assert "unattested_review_state" in stdout
 
 
-def test_state_behind_attestation_is_healed_by_a_rerun(
-    run_cli: RunCli, tmp_repo: Path, unreviewed: str
+@pytest.mark.parametrize("verb", ["ratify", "reject"])
+def test_state_behind_diagnostic_command_parses_and_heals(
+    run_cli: RunCli, tmp_repo: Path, unreviewed: str, verb: str
 ) -> None:
     path = record_path(tmp_repo, unreviewed)
     original = path.read_text(encoding="utf-8")
-    run_cli(["ratify", unreviewed, "--by", "@tester"], tmp_repo)
+    run_cli([verb, unreviewed, "--by", "@tester"], tmp_repo)
     count = len(attestation_lines(tmp_repo))
     path.write_text(original, encoding="utf-8")
 
     code, stdout = validate(run_cli, tmp_repo)
     assert code == 1
-    assert f"state_behind_attestation: run scribe ratified {unreviewed} again" in stdout
+    match = re.search(
+        rf"state_behind_attestation: run (scribe \w+ {re.escape(unreviewed)}) again",
+        stdout,
+    )
+    assert match is not None
 
-    code, stdout, _ = run_cli(["ratify", unreviewed, "--by", "@tester"], tmp_repo)
+    suggested = shlex.split(match.group(1))
+    code, stdout, _ = run_cli([*suggested[1:], "--by", "@tester"], tmp_repo)
     assert code == 0
-    assert stdout.startswith(f"ratified {unreviewed} by @tester")
+    assert stdout.startswith(f"{ratify_module.VERDICTS[verb]} {unreviewed} by @tester")
     assert len(attestation_lines(tmp_repo)) == count
-    assert load(tmp_repo, unreviewed).data["review_state"] == "ratified"
+    assert load(tmp_repo, unreviewed).data["review_state"] == ratify_module.VERDICTS[verb]
+    assert validate(run_cli, tmp_repo)[0] == 0
+
+
+def test_recovery_uses_actor_and_timestamp_from_attestation(
+    run_cli: RunCli, tmp_repo: Path, unreviewed: str
+) -> None:
+    original = record_path(tmp_repo, unreviewed).read_text(encoding="utf-8")
+    attested_at = "2026-09-08T21:00:00Z"
+    run_cli(
+        ["ratify", unreviewed, "--by", "@alice", "--at", attested_at], tmp_repo
+    )
+    count = len(attestation_lines(tmp_repo))
+    record_path(tmp_repo, unreviewed).write_text(original, encoding="utf-8")
+
+    code, stdout, _ = run_cli(
+        [
+            "ratify",
+            unreviewed,
+            "--by",
+            "@bob",
+            "--at",
+            "2026-09-09T01:00:00Z",
+        ],
+        tmp_repo,
+    )
+    recovered = load(tmp_repo, unreviewed)
+
+    assert code == 0
+    assert stdout.startswith(f"ratified {unreviewed} by @alice")
+    assert len(attestation_lines(tmp_repo)) == count
+    assert recovered.data["ratified_by"] == "@alice"
+    assert recovered.data["ratified_at"] == attested_at
+    assert entries(recovered, "ratified")[-1]["at"] == "2026-09-09T01:00:00Z"
+
+
+def test_matching_record_with_contradictory_latest_attestation_is_repaired(
+    run_cli: RunCli, tmp_repo: Path, unreviewed: str
+) -> None:
+    run_cli(
+        [
+            "ratify",
+            unreviewed,
+            "--by",
+            "@alice",
+            "--at",
+            "2026-09-08T21:00:00Z",
+        ],
+        tmp_repo,
+    )
+    record = load(tmp_repo, unreviewed)
+    contradictory = {
+        "id": record.data["id"],
+        "alias": unreviewed,
+        "verdict": "rejected",
+        "by": "@carol",
+        "at": "2026-09-09T01:00:00Z",
+        "body_sha256": record.body_sha256(),
+        "via": "cli",
+        "note": "",
+    }
+    ratify_module.append_attestation(ratify_module.Store(tmp_repo), contradictory)
+    count = len(attestation_lines(tmp_repo))
+
+    code, stdout, _ = run_cli(
+        [
+            "ratify",
+            unreviewed,
+            "--by",
+            "@bob",
+            "--at",
+            "2026-09-09T02:00:00Z",
+        ],
+        tmp_repo,
+    )
+
+    assert code == 0
+    assert stdout == f"ratified {unreviewed} by @bob (via cli)\n"
+    assert len(attestation_lines(tmp_repo)) == count + 1
+    assert attestation_lines(tmp_repo)[-1]["verdict"] == "ratified"
+    assert load(tmp_repo, unreviewed).data["ratified_by"] == "@bob"
     assert validate(run_cli, tmp_repo)[0] == 0
 
 
@@ -362,6 +451,32 @@ def test_failed_attestation_append_changes_nothing(
     assert code == 0
     assert len(attestation_lines(tmp_repo)) == len(lines) + 1
     assert load(tmp_repo, unreviewed).data["review_state"] == "ratified"
+
+
+def test_ratify_lock_timeout_exits_nonzero_without_ledger_writes(
+    run_cli: RunCli, tmp_repo: Path, unreviewed: str
+) -> None:
+    lock_path = tmp_repo / ".claude" / "scribe" / ratify_module.LOCK_FILE
+    before_record = record_path(tmp_repo, unreviewed).read_bytes()
+    before_attestations = (decisions(tmp_repo) / "RATIFICATIONS.jsonl").read_bytes()
+    index_path = decisions(tmp_repo) / "INDEX.md"
+    assert not index_path.exists()
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code, stdout, _ = run_cli(
+            ["ratify", unreviewed, "--by", "@tester"], tmp_repo
+        )
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    assert elapsed >= 2.0
+    assert code == 1
+    assert stdout == "ratification lock timeout; retry the same command\n"
+    assert record_path(tmp_repo, unreviewed).read_bytes() == before_record
+    assert (decisions(tmp_repo) / "RATIFICATIONS.jsonl").read_bytes() == before_attestations
+    assert not index_path.exists()
 
 
 def test_failed_index_write_is_healed_by_a_rerun(

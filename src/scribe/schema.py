@@ -221,7 +221,10 @@ def validate_record(
                     error("unattested_review_state", "review state has no matching current-body attestation")
             elif review_state == "unreviewed" and attestation:
                 verdict = attestation.get("verdict", "ratify")
-                error("state_behind_attestation", f"run scribe {verdict} {alias} again to apply the recorded verdict")
+                command = {"ratified": "ratify", "rejected": "reject"}.get(
+                    verdict, verdict
+                )
+                error("state_behind_attestation", f"run scribe {command} {alias} again to apply the recorded verdict")
     return problems
 
 

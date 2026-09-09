@@ -66,15 +66,6 @@ def append_attestation(store: Store, line: dict[str, object]) -> None:
         os.fsync(handle.fileno())
 
 
-def _attestation_matches(record: Record, verdict: str, store: Store) -> bool:
-    latest = store.latest_attestation(record.data.get("id"))
-    return (
-        latest is not None
-        and latest.get("verdict") == verdict
-        and latest.get("body_sha256") == record.body_sha256()
-    )
-
-
 def _finish(store: Store, verb: str) -> None:
     """Steps 5 and 6: reconcile predecessors, then regenerate INDEX.md."""
     for changed in reconcile_supersession(
@@ -95,19 +86,34 @@ def apply_verdict(
 ) -> Outcome:
     verdict = VERDICTS[verb]
     stamp = at or utc_now()
-    with locked(state_dir(store.root) / LOCK_FILE):
+    with locked(state_dir(store.root) / LOCK_FILE) as acquired:
+        if not acquired:
+            return Outcome(1, "ratification lock timeout; retry the same command")
         record = store.resolve(token)
         if record is None:
             return Outcome(1, f"unknown record: {token}")
         alias = str(record.data.get("alias"))
-        if record.data.get("review_state") == verdict:
+        latest = store.latest_attestation(record.data.get("id"))
+        attestation_matches = (
+            latest is not None
+            and latest.get("verdict") == verdict
+            and latest.get("body_sha256") == record.body_sha256()
+        )
+        authoritative_by = latest.get("by") if attestation_matches else by
+        authoritative_at = latest.get("at") if attestation_matches else stamp
+        record_matches = (
+            record.data.get("review_state") == verdict
+            and record.data.get("ratified_by") == authoritative_by
+            and record.data.get("ratified_at") == authoritative_at
+        )
+        if attestation_matches and record_matches:
             _finish(store, verb)
             return Outcome(
                 0,
                 f"already {verdict} by {record.data.get('ratified_by')} "
                 f"at {record.data.get('ratified_at')}",
             )
-        if not _attestation_matches(record, verdict, store):
+        if not attestation_matches:
             append_attestation(
                 store,
                 {
@@ -123,10 +129,10 @@ def apply_verdict(
             )
         for field, new in (
             ("review_state", verdict),
-            ("ratified_by", by),
-            ("ratified_at", stamp),
+            ("ratified_by", authoritative_by),
+            ("ratified_at", authoritative_at),
         ):
             record.apply_change(field, new, verdict, by, at=stamp, force=True)
         record.save()
         _finish(store, verb)
-    return Outcome(0, f"{verdict} {alias} by {by} (via {via})")
+    return Outcome(0, f"{verdict} {alias} by {authoritative_by} (via {via})")

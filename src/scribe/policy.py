@@ -44,13 +44,13 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         # rm with both a recursive and a force flag (any order, combined or not)
-        # whose first target starts with `/`, `~` or `..`.
+        # and any target that starts with `/`, `~` or `..`.
         "rm-rf-outside-worktree",
         re.compile(
             r"\brm"
-            r"(?=(?: -[a-zA-Z-]+)* -(?:[a-zA-Z]*[rR][a-zA-Z]*|-recursive)(?: |$))"
-            r"(?=(?: -[a-zA-Z-]+)* -(?:[a-zA-Z]*f[a-zA-Z]*|-force)(?: |$))"
-            r"(?: -[a-zA-Z-]+)* (?:/|~|\.\.)"
+            r"(?=[^;&|]* (?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(?= |$|[;&|]))"
+            r"(?=[^;&|]* (?:-[a-zA-Z]*f[a-zA-Z]*|--force)(?= |$|[;&|]))"
+            r"[^;&|]* (?:/|~|\.\.)"
         ),
     ),
     (

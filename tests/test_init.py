@@ -26,6 +26,18 @@ FOREIGN_HOOK = "#!/bin/sh\nexit 0\n"
 RunCli = Callable[..., tuple[int, str, str]]
 
 
+def test_ci_source_filesystem_path_is_one_shell_argument(tmp_path: Path) -> None:
+    from scribe.init_repo import check_command
+
+    source = tmp_path / "plugin's path; literal $(name)"
+    source.mkdir()
+    command, warning = check_command(str(source))
+    assert shlex.split(command) == [
+        "uv", "run", "--frozen", "--project", str(source), "scribe", "check"
+    ]
+    assert warning is not None
+
+
 # --- helpers -----------------------------------------------------------------
 
 

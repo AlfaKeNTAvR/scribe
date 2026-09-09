@@ -162,7 +162,7 @@ def test_windows_adapter_retries_then_acquires(tmp_repo: Path, windows_lock) -> 
     assert len(lock_calls) == 4
 
 
-def test_windows_adapter_bounded_retry_then_proceeds_unlocked(
+def test_windows_adapter_bounded_retry_then_reports_timeout(
     tmp_repo: Path, windows_lock
 ) -> None:
     fake = windows_lock(fail_times=10**6)
@@ -173,7 +173,7 @@ def test_windows_adapter_bounded_retry_then_proceeds_unlocked(
     assert "state lock timeout" in error_log_path(tmp_repo).read_text(encoding="utf-8")
 
 
-def test_posix_contention_is_bounded_and_state_still_written(
+def test_posix_contention_drops_state_update(
     tmp_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(state_module, "LOCK_RETRY_INTERVAL_S", 0.005)
@@ -183,7 +183,7 @@ def test_posix_contention_is_bounded_and_state_still_written(
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         update_state(tmp_repo, add_session("s1"), now="2026-09-08T12:00:00Z")
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
-    assert "s1" in load_state(tmp_repo)["sessions"]
+    assert "s1" not in load_state(tmp_repo)["sessions"]
     assert "state lock timeout" in error_log_path(tmp_repo).read_text(encoding="utf-8")
 
 

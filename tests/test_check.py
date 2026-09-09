@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import json
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -147,6 +148,43 @@ def test_a_decision_trailer_in_the_range_fails(run_cli: RunCli, ledger: Path) ->
 
     assert code == 1
     assert f"{successor} supersedes ratified {RATIFIED_A}" in stdout
+
+
+@pytest.mark.parametrize("affects,changed,denied", [
+    ([], "src/x.py", True),
+    ([{"type": "action", "pattern": "npm-publish"}], "src/x.py", True),
+    ([{"type": "package", "pattern": "scribe"}], "src/x.py", True),
+    ([{"type": "path", "pattern": "src/**"},
+      {"type": "path", "pattern": "src/x.py", "negate": True}], "src/x.py", False),
+    ([{"type": "path", "pattern": "docs/**"}], "docs/decisions/notes.md", False),
+    ([], "docs/decisions/notes.md", False),
+])
+def test_dependency_gate_uses_implementation_paths(
+    run_cli: RunCli, ledger: Path, affects: list, changed: str, denied: bool
+) -> None:
+    spec = json.loads(SPEC_SUPERSEDES.read_text(encoding="utf-8"))
+    spec["affects"] = affects
+    spec_path = ledger / "spec.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    assert run_cli(["new", "--spec", str(spec_path)], ledger)[0] == 0
+    commit_all(ledger, "docs: Existing successor")
+    git(ledger, "checkout", "-q", "-b", "dependency")
+    write_source(ledger, changed, "changed\n")
+    commit_all(ledger, "feat: Follow decision without a trailer")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == int(denied), stdout
+    assert ("supersedes ratified" in stdout) is denied
+
+
+@pytest.mark.parametrize("suffix", ["\n", " ", "\t\n"])
+def test_body_trailing_bytes_are_immutable(suffix: str) -> None:
+    from scribe.history_check import compare_record_versions
+
+    original = "---\ntitle: Body\n---\n\n# Body\n"
+    problems = compare_record_versions(original, original + suffix)
+    assert any(p.code == "immutable_changed" and "body" in p.message for p in problems)
 
 
 # --- ledger integrity (plan 5.4 rules 4 and 5) -------------------------------

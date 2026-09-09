@@ -81,7 +81,7 @@ def test_unreviewed_record_detects_existing_attestation(tmp_path: Path) -> None:
     problems = validate_record(loaded.data, loaded.body, store)
     behind = [problem for problem in problems if problem.code == "state_behind_attestation"]
     assert len(behind) == 1
-    assert "run scribe ratified D-260908-sound-choice again" in behind[0].message
+    assert "run scribe ratify D-260908-sound-choice again" in behind[0].message
 
 
 def test_committed_record_body_hashes_match_attestations() -> None:
