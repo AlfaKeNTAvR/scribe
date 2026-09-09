@@ -64,3 +64,4 @@ claude --plugin-dir /home/alfakentavr/scribe     # then /reload-plugins, /scribe
 ```
 
 Standing rules: `/commit` skill for every commit, ask before push or PR, branch names `nikita/<type>/<kebab>`, plain hyphens only, Sonnet for implementation subagents and Opus for review, Codex runs detached with the 20-minute cap.
+- Interview follow-ups (evening 2026-09-09): Q3 post-rewrite hook (four shims now, dogfood and playgrounds refreshed) and Q4 pytest verify engine are committed; Q2 dropped after U2 (README warns against Bash deny rules on ratify); Q1 GitHub repo and push still wait for an explicit go; Q5 and Q6 accepted as is. Suite: 424 passed, 3 skipped. Extra throwaway worktrees `q2`, `q3`, `q4` under `/home/alfakentavr/scribe-wt/` await owner deletion. Candidate record: post-commit fires per replayed commit during rebase (I127).
