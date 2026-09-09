@@ -11,6 +11,7 @@ from __future__ import annotations
 import fcntl
 import json
 import subprocess
+import textwrap
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -596,6 +597,156 @@ def test_a_no_match_verify_entry_fails_when_the_pattern_is_present(
     _, findings = lint(run_cli, lint_repo)
 
     assert "verify_failed" in codes(findings)
+
+
+# --- verify entries: pytest engine (Q4) ---------------------------------------
+
+
+def pytest_project(repo: Path) -> None:
+    """A tiny pytest project inside `repo`, locked so `uv run --frozen` works."""
+    (repo / "pyproject.toml").write_text(
+        textwrap.dedent(
+            """\
+            [project]
+            name = "verify-target"
+            version = "0.1.0"
+            requires-python = ">=3.12"
+            dependencies = ["pytest"]
+            """
+        ),
+        encoding="utf-8",
+    )
+    tests_dir = repo / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    (tests_dir / "test_target.py").write_text(
+        textwrap.dedent(
+            """\
+            import time
+
+
+            def test_ok():
+                pass
+
+
+            def test_broken():
+                assert False
+
+
+            def test_slow():
+                time.sleep(5)
+            """
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["uv", "lock"], cwd=repo, check=True, capture_output=True)
+
+
+def pytest_entry(**overrides: Any) -> dict[str, Any]:
+    entry = {
+        "id": "pytest-check",
+        "engine": "pytest",
+        "target": "tests/test_target.py::test_ok",
+        "expect": "pass",
+        "severity": "warning",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_a_passing_pytest_verify_entry_reports_nothing(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    pytest_project(lint_repo)
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[pytest_entry()],
+    )
+    assert run_cli(["index"], lint_repo)[0] == 0
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 0
+    assert findings == []
+
+
+def test_a_failing_pytest_verify_entry_reports_verify_failed(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    pytest_project(lint_repo)
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[
+            pytest_entry(target="tests/test_target.py::test_broken", severity="error")
+        ],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "verify_failed")["severity"] == "error"
+
+
+def test_expect_fail_inverts_a_pytest_verify_entry(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    pytest_project(lint_repo)
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[
+            pytest_entry(target="tests/test_target.py::test_broken", expect="fail")
+        ],
+    )
+    assert run_cli(["index"], lint_repo)[0] == 0
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 0
+    assert findings == []
+
+
+def test_a_pytest_verify_entry_that_times_out_reports_verify_error(
+    run_cli: RunCli, lint_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest_project(lint_repo)
+    monkeypatch.setenv("SCRIBE_VERIFY_TIMEOUT", "1")
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[pytest_entry(target="tests/test_target.py::test_slow")],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "verify_error")["severity"] == "error"
+
+
+def test_a_pytest_verify_entry_without_a_pytest_project_reports_verify_error(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    (lint_repo / "tests").mkdir()
+    (lint_repo / "tests" / "test_target.py").write_text(
+        "def test_ok():\n    pass\n", encoding="utf-8"
+    )
+    write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        verify=[pytest_entry()],
+    )
+
+    code, findings = lint(run_cli, lint_repo)
+
+    assert code == 1
+    assert find(findings, "verify_error")["severity"] == "error"
+    assert "invalid_verify" not in codes(findings)
 
 
 # --- scratch state ------------------------------------------------------------

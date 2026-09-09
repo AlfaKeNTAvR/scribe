@@ -212,3 +212,7 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 - O8. Q6: keep bognik3@gmail.com as the marketplace owner email.
 - O9. Follow-up work for Q2 to Q4 runs in parallel worktree agents (owner choice), GitHub creation waits for an explicit go.
 - O10. Q2 reversed after the U2 live test (`pipeline/step11_u2_test.sh`, playground 03): with `Bash(*scribe ratify*)` and `Bash(*scribe reject*)` in the project deny list, the human-typed `/scribe:ratify` produced no output at all, while the control run printed "already ratified". Skill inline commands go through the same permission check as agent Bash calls (U2 resolved: they do), so no Bash deny rules are written; ratification stays human-only by construction (O7). The Q2 worktree is discarded.
+- I120 (Q4, worktree agent). pytest verify targets are existence-checked only when a store is available, like the existing dangling_reference check.
+- I121 (Q4). The "pytest available" gate is textual (pyproject exists and mentions pytest); true absence still surfaces as `verify_error` from the subprocess.
+- I122 (Q4). pytest exit codes other than 0 and 1 (collection error, usage error, nothing collected, interrupted) map to `verify_error`; timeout default 60 s, `SCRIBE_VERIFY_TIMEOUT` overrides.
+- I123 (Q4). Reused existing codes `verify_failed`, `verify_error`, `invalid_verify`, `unknown_engine`; README gained a verify-engines paragraph under Record format (none existed before).

@@ -232,7 +232,7 @@ def validate_record(
     review = mapping.get("review")
     if review is not None and not _valid_date(review):
         error("invalid_review", "review must be null or YYYY-MM-DD")
-    _validate_verify(mapping.get("verify"), error)
+    _validate_verify(mapping.get("verify"), error, store)
 
     supersedes = mapping.get("supersedes")
     if supersedes is not None and not _is_str(supersedes):
@@ -429,13 +429,21 @@ def _validate_links(value: Any, error: Any) -> None:
             error("invalid_implementation_link", "invalid implementation link")
 
 
-def _validate_verify(value: Any, error: Any) -> None:
-    keys = {"id", "engine", "pattern", "paths", "expect", "severity"}
+def _validate_verify(value: Any, error: Any, store: Store | None = None) -> None:
+    grep_keys = {"id", "engine", "pattern", "paths", "expect", "severity"}
+    pytest_keys = {"id", "engine", "target", "expect", "severity"}
     if not isinstance(value, list):
         error("invalid_type", "verify must be a list")
         return
     for item in value:
-        if not isinstance(item, dict) or set(item) != keys:
+        if not isinstance(item, dict):
+            error(
+                "invalid_verify", "verify item must contain exactly the required keys"
+            )
+            continue
+        engine = item.get("engine")
+        expected_keys = pytest_keys if engine == "pytest" else grep_keys
+        if set(item) != expected_keys:
             error(
                 "invalid_verify", "verify item must contain exactly the required keys"
             )
@@ -445,22 +453,53 @@ def _validate_verify(value: Any, error: Any) -> None:
                 "invalid_verify",
                 "verify id must contain lowercase letters, digits, or hyphens",
             )
-        engine = item["engine"]
         if engine == "jsonpath":
             error(
                 "unsupported_engine",
                 "jsonpath is on the README allowlist but not implemented in this release",
             )
-        elif engine != "grep":
+        elif engine not in {"grep", "pytest"}:
             error("unknown_engine", f"unknown verify engine: {engine}")
-        if not _is_str(item["pattern"]):
-            error("invalid_verify", "verify pattern must be a string")
-        if not _is_list_of_strings(item["paths"]):
-            error("invalid_verify", "verify paths must be a list of strings")
-        if not _in_str_set(item["expect"], {"match", "no-match"}):
-            error("invalid_verify", "verify expect must be match or no-match")
         if not _in_str_set(item["severity"], {"error", "warning"}):
             error("invalid_verify", "verify severity must be error or warning")
+        if engine == "pytest":
+            if not _in_str_set(item["expect"], {"pass", "fail"}):
+                error("invalid_verify", "verify expect must be pass or fail")
+            _validate_pytest_target(item.get("target"), error, store)
+        else:
+            if not _is_str(item["pattern"]):
+                error("invalid_verify", "verify pattern must be a string")
+            if not _is_list_of_strings(item["paths"]):
+                error("invalid_verify", "verify paths must be a list of strings")
+            if not _in_str_set(item["expect"], {"match", "no-match"}):
+                error("invalid_verify", "verify expect must be match or no-match")
+
+
+def _validate_pytest_target(target: Any, error: Any, store: Store | None) -> None:
+    """`target` must be a pytest node id `path[::name[::name...]]`, plan Q4.
+
+    The path segment (before the first `::`) must exist relative to the repo
+    root; that check only runs when a store is available (same limitation as
+    `dangling_reference` above).
+    """
+    if not _is_str(target) or not target:
+        error("invalid_verify", "verify target must be a non-empty string")
+        return
+    parts = target.split("::")
+    path = parts[0]
+    if (
+        not path
+        or path.startswith(("/", "~"))
+        or any(segment == ".." for segment in path.split("/"))
+        or any(not name for name in parts[1:])
+    ):
+        error(
+            "invalid_verify",
+            "verify target must look like path or path::name, relative to the repo root",
+        )
+        return
+    if store is not None and not (store.root / path).exists():
+        error("invalid_verify", f"verify target path does not exist: {path}")
 
 
 def _validate_history(value: Any, error: Any) -> None:

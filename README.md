@@ -68,6 +68,14 @@ immutable, and every change to a mutable field (`review_state`,
 history entry. Never edit `docs/decisions/RATIFICATIONS.jsonl` by hand either;
 see the ratification model below.
 
+`verify` entries (run by `scribe lint` only) support two engines: `grep`
+(`{pattern, paths}`, a regex checked against files selected by glob) and
+`pytest` (`{target}`, a pytest node id or path run with `uv run --frozen
+pytest -q -x <target>` from the repository root, gated on that repository
+having a `pyproject.toml` that names pytest; bounded by a timeout, 60 seconds
+by default and overridable with `SCRIBE_VERIFY_TIMEOUT`). `jsonpath` is named
+on this allowlist but not implemented in this release.
+
 ## Ratification model
 
 `docs/decisions/RATIFICATIONS.jsonl` is committed and append only, one JSON

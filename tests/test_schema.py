@@ -114,6 +114,90 @@ def test_max_ulid_produces_date_diagnostic_not_crash() -> None:
     assert "invalid_ulid" not in {p.code for p in problems}
 
 
+def _record_with_verify(tmp_path: Path, verify: list[dict]) -> tuple[Store, object]:
+    """A store-backed record (Q4) so `_validate_pytest_target` can check paths."""
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    record = Record.load(FIXTURES / "valid_minimal.md")
+    record.data["verify"] = verify
+    record.path = decisions / f"{record.data['alias']}.md"
+    record.save()
+    store = Store(tmp_path)
+    return store, store.records()[0]
+
+
+def test_pytest_verify_entry_accepts_a_valid_node_id(tmp_path: Path) -> None:
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_x.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    store, record = _record_with_verify(
+        tmp_path,
+        [
+            {
+                "id": "sample",
+                "engine": "pytest",
+                "target": "tests/test_x.py::test_ok",
+                "expect": "pass",
+                "severity": "error",
+            }
+        ],
+    )
+    problems = validate_record(record.data, record.body, store)
+    assert problems == []
+
+
+def test_pytest_verify_entry_rejects_a_bad_node_id(tmp_path: Path) -> None:
+    store, record = _record_with_verify(
+        tmp_path,
+        [
+            {
+                "id": "sample",
+                "engine": "pytest",
+                "target": "::test_ok",
+                "expect": "pass",
+                "severity": "error",
+            }
+        ],
+    )
+    problems = validate_record(record.data, record.body, store)
+    assert "invalid_verify" in {p.code for p in problems}
+
+
+def test_pytest_verify_entry_rejects_a_target_path_that_does_not_exist(
+    tmp_path: Path,
+) -> None:
+    store, record = _record_with_verify(
+        tmp_path,
+        [
+            {
+                "id": "sample",
+                "engine": "pytest",
+                "target": "tests/does_not_exist.py::test_ok",
+                "expect": "pass",
+                "severity": "error",
+            }
+        ],
+    )
+    problems = validate_record(record.data, record.body, store)
+    assert "invalid_verify" in {p.code for p in problems}
+
+
+def test_verify_entry_with_an_unknown_engine_is_rejected() -> None:
+    record = Record.load(FIXTURES / "valid_minimal.md")
+    record.data["verify"] = [
+        {
+            "id": "sample",
+            "engine": "xpath",
+            "pattern": "x",
+            "paths": ["src/x.py"],
+            "expect": "match",
+            "severity": "error",
+        }
+    ]
+    problems = validate_record(record.data, record.body)
+    assert "unknown_engine" in {p.code for p in problems}
+
+
 def test_record_hash_and_apply_change() -> None:
     record = Record.load(FIXTURES / "valid_minimal.md")
     original_hash = record.body_sha256()

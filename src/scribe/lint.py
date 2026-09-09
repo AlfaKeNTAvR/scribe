@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -40,6 +41,7 @@ DEFAULT_BASES = ("origin/main", "HEAD~1")
 # them here before they are.
 ACTIVE_STATES = {"proposed", "implemented", "backtracked"}
 SKIPPED_DIRECTORIES = {".git"}
+DEFAULT_VERIFY_TIMEOUT_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -361,9 +363,13 @@ def _verify_findings(store: Store, files: list[str]) -> list[Finding]:
     for record in store.records():
         relative = _relative(store, record.path)
         for entry in record.data.get("verify") or []:
-            if not isinstance(entry, dict) or entry.get("engine") != "grep":
+            if not isinstance(entry, dict):
                 continue
-            findings.extend(_run_verify_entry(store, entry, files, relative))
+            engine = entry.get("engine")
+            if engine == "grep":
+                findings.extend(_run_verify_entry(store, entry, files, relative))
+            elif engine == "pytest":
+                findings.extend(_run_pytest_verify_entry(store, entry, relative))
     return findings
 
 
@@ -445,6 +451,120 @@ def _run_verify_entry(
                 )
             )
     return findings
+
+
+def _verify_timeout_seconds() -> float:
+    raw = os.environ.get("SCRIBE_VERIFY_TIMEOUT")
+    if raw is None:
+        return DEFAULT_VERIFY_TIMEOUT_SECONDS
+    try:
+        return float(raw)
+    except ValueError:
+        return DEFAULT_VERIFY_TIMEOUT_SECONDS
+
+
+def _pytest_available(root: Path) -> bool:
+    """Whether `root` looks set up to run `uv run --frozen pytest` (plan Q4).
+
+    A cheap gate, not a guarantee: a `pyproject.toml` that mentions `pytest`.
+    Anything short of that (no file, or one that never names pytest) is
+    reported as `verify_error` without spawning a subprocess.
+    """
+    pyproject = root / "pyproject.toml"
+    try:
+        return pyproject.is_file() and "pytest" in pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _run_pytest_verify_entry(
+    store: Store,
+    entry: dict[str, Any],
+    relative: str,
+) -> list[Finding]:
+    """One `verify` entry with `engine: pytest`, mirroring the grep engine above.
+
+    Runs `uv run --frozen pytest -q -x <target>` from the repository root.
+    `expect: pass` wants exit code 0, `expect: fail` wants exit code 1;
+    anything else (timeout, missing pytest, a collection or usage error) is
+    `verify_error`, never a crash out of lint.
+    """
+    entry_id = str(entry.get("id", "?"))
+    severity = entry.get("severity")
+    if severity not in {"error", "warning"}:
+        severity = "error"
+    target = entry.get("target")
+    if not isinstance(target, str) or not target:
+        return [
+            Finding(
+                "error",
+                "verify_error",
+                f"verify {entry_id}: target is not a string",
+                relative,
+            )
+        ]
+    if not _pytest_available(store.root):
+        return [
+            Finding(
+                "error",
+                "verify_error",
+                f"verify {entry_id}: pytest is not available in {store.root}",
+                relative,
+            )
+        ]
+    timeout = _verify_timeout_seconds()
+    command = ["uv", "run", "--frozen", "pytest", "-q", "-x", target]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=store.root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return [
+            Finding(
+                "error",
+                "verify_error",
+                f"verify {entry_id}: pytest timed out after {timeout:g}s running "
+                f"{target}",
+                relative,
+            )
+        ]
+    except OSError as exc:
+        return [
+            Finding(
+                "error",
+                "verify_error",
+                f"verify {entry_id}: could not run pytest: {exc}",
+                relative,
+            )
+        ]
+    if result.returncode not in (0, 1):
+        return [
+            Finding(
+                "error",
+                "verify_error",
+                f"verify {entry_id}: pytest collection or usage error running "
+                f"{target} (exit {result.returncode})",
+                relative,
+            )
+        ]
+    passed = result.returncode == 0
+    expect_pass = entry.get("expect") != "fail"
+    if passed != expect_pass:
+        outcome = "passed" if passed else "failed"
+        expected = "pass" if expect_pass else "fail"
+        return [
+            Finding(
+                severity,
+                "verify_failed",
+                f"verify {entry_id}: {target} {outcome}, expected {expected}",
+                relative,
+            )
+        ]
+    return []
 
 
 def _pending_findings(store: Store) -> list[Finding]:
