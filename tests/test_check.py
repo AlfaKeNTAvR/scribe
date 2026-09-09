@@ -17,6 +17,10 @@ SPEC_PLAIN = FIXTURES / "new_spec.json"
 SPEC_SUPERSEDES = FIXTURES / "check_spec_supersedes.json"
 SUCCESSOR_SLUG = "merge-gate-blocks-unreviewed-successors"
 RATIFIED_A = "D-260908-unreviewed-may-supersede-ratified"
+# No other seed record's relates_to points at this one, unlike RATIFIED_A
+# (see D-260908-one-way-door-defer-not-stop); deleting it does not also
+# trip an unrelated dangling_reference validation error.
+UNREFERENCED = "D-260908-verbatim-quote-is-the-evidence"
 
 RunCli = Callable[..., tuple[int, str, str]]
 
@@ -342,6 +346,74 @@ def test_renaming_a_record_file_counts_as_deleted_plus_added(
 
     assert code == 1
     assert f"record_deleted: {RATIFIED_A}" in stdout
+
+
+def test_adding_then_deleting_a_record_inside_the_range_fails(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """V6 follow-up: a record added after the base and deleted again before
+    HEAD is invisible to a plain base-vs-HEAD tree comparison (neither
+    endpoint ever carries it), so the merge gate must also catch it via the
+    commits inside the range. Fails on the old code, which only diffed
+    `tree_record_paths(base)` against `tree_record_paths("HEAD")`: since the
+    record is absent from both trees, `base_paths - head_paths` is empty and
+    `record_deleted` never appears.
+    """
+    git(ledger, "checkout", "-q", "-b", "add-then-delete")
+    code, new_stdout, _ = run_cli(["new", "--spec", str(SPEC_PLAIN)], ledger)
+    assert code == 0
+    alias = Path(new_stdout.strip()).stem
+    commit_all(ledger, "docs: Record an ordinary decision")
+    (decisions(ledger) / f"{alias}.md").unlink()
+    commit_all(ledger, "chore: Delete the record again inside the same range")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"record_deleted: {alias}" in stdout
+    assert "retire it with expired or backtracked" in stdout
+
+
+def test_adding_and_keeping_a_record_inside_the_range_passes(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """Companion to the add-then-delete case above: a record added inside
+    the range and never removed must not be flagged just because it is
+    absent from the base tree.
+    """
+    git(ledger, "checkout", "-q", "-b", "add-then-keep")
+    code, new_stdout, _ = run_cli(["new", "--spec", str(SPEC_PLAIN)], ledger)
+    assert code == 0
+    alias = Path(new_stdout.strip()).stem
+    commit_all(ledger, "docs: Record an ordinary decision")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert (code, stdout.strip()) == (0, "scribe check: ok")
+    assert alias not in stdout
+
+
+def test_a_record_deleted_before_the_base_is_not_reported_twice(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """A record that was already gone before the base commit (never present
+    anywhere inside the checked range) must not be reported at all, and in
+    particular the range-wide `git log --diff-filter=D` scan must not
+    resurface it a second time alongside the base-vs-HEAD comparison: both
+    sources are unioned into a set before the reasons are rendered, so the
+    same path can only ever produce one `record_deleted` line.
+    """
+    (decisions(ledger) / f"{UNREFERENCED}.md").unlink()
+    assert run_cli(["index"], ledger)[0] == 0
+    commit_all(ledger, "chore: Delete a record before the base commit")
+    git(ledger, "checkout", "-q", "-b", "unrelated")
+    write_source(ledger, "src/y.py", "value = 2\n")
+    commit_all(ledger, "chore: Add unrelated code")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert (code, stdout.strip()) == (0, "scribe check: ok")
+    assert stdout.count("record_deleted") == 0
 
 
 # --- dirty ledger guard, base-tip authority (plan 5.4, V3) ------------------

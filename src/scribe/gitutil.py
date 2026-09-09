@@ -357,3 +357,43 @@ def tree_record_paths(
         for path in paths
         if path.endswith(".md") and path.rsplit("/", 1)[-1].startswith("D-")
     ]
+
+
+def deleted_paths_in_range(
+    base: str,
+    head: str = "HEAD",
+    subdir: str = "docs/decisions",
+    cwd: str | Path = ".",
+    *,
+    strict: bool = False,
+) -> list[str]:
+    """Every path some commit in `base..head` deleted under `subdir` (V6).
+
+    `strict=True` raises `GitError` instead of returning `[]` on failure, like
+    the other range helpers `scribe check` calls (V3(b)).
+
+    One `git log --diff-filter=D --name-only -z` walks the whole range in a
+    single process; the alternative (a tree listing or a diff per commit in
+    the range) costs one process per commit instead of one process total.
+    `--format=` drops the commit header from each entry the same way
+    `commit_changed_paths`'s root-commit branch already does, so the NUL
+    stream is nothing but repository-relative filenames and this can go
+    straight through `_paths_from_z`. A path deleted more than once in the
+    range (deleted, restored, deleted again) appears once per deleting
+    commit; callers that only need "was this path ever deleted" should put
+    the result in a set.
+    """
+    result = _git_bytes(
+        cwd,
+        "log",
+        "--format=",
+        "--name-only",
+        "-z",
+        "--diff-filter=D",
+        f"{base}..{head}",
+        "--",
+        subdir,
+    )
+    if strict and result.returncode != 0:
+        raise GitError(f"the paths deleted in {base}..{head}", result)
+    return _paths_from_z(result)

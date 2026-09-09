@@ -160,23 +160,52 @@ def _alias_at(root: Path, rev: str, path: str) -> str:
     return Path(path).stem
 
 
+def _deleted_record_paths(
+    base_paths: set[str], head_paths: set[str], range_deleted: list[str]
+) -> set[str]:
+    """Every record path missing at HEAD that existed somewhere in the range (V6).
+
+    Base-vs-HEAD alone misses a record that was both added and deleted
+    inside the same range: neither endpoint carries it, so a plain
+    `base_paths - head_paths` set difference never sees it. Union in every
+    path any commit in `base..head` deleted (`range_deleted`, one `git log
+    --diff-filter=D --name-only -z` call for the whole range, not a tree or
+    diff per commit) before subtracting what HEAD still has. A record deleted
+    and then restored within the range is not reported: it is present at
+    HEAD, so it drops out of the final subtraction regardless of which
+    source saw the deletion.
+    """
+    deleted = {
+        path
+        for path in range_deleted
+        if path.endswith(".md") and path.rsplit("/", 1)[-1].startswith("D-")
+    }
+    return (base_paths | deleted) - head_paths
+
+
 def _deleted_record_reasons(
-    root: Path, base: str, base_paths: set[str], head_paths: set[str]
+    root: Path,
+    base: str,
+    base_paths: set[str],
+    head_paths: set[str],
+    range_deleted: list[str],
 ) -> list[str]:
-    """Rule 6: a record present at the base and gone at the tip must not merge (V6).
+    """Rule 6: a record deleted anywhere in the range must not merge (V6).
 
     Retirement goes through `expired` or `backtracked`; deleting the file
     bypasses the ledger's immutability, so the owner's call is that this
-    always fails, with no `--allow-delete` escape (supersedes I45). The path
-    sets are precomputed by the caller with the strict form of
-    `tree_record_paths` (V3(b)): a git failure while listing either tree must
-    fail the check, not be read as "no records here".
+    always fails, with no `--allow-delete` escape (supersedes I45). Covers
+    both a record present at the base and gone at the tip, and one added
+    after the base and deleted again before the tip (`_deleted_record_paths`).
+    The three inputs are precomputed by the caller with the strict git
+    helpers (V3(b)): a git failure while listing either tree or the range's
+    deletions must fail the check, not be read as "no records here".
     """
     return [
-        f"{path}: record_deleted: {_alias_at(root, base, path)} was present at "
-        f"{base} and is missing at HEAD; retire it with expired or backtracked "
+        f"{path}: record_deleted: {_alias_at(root, base, path)} was deleted inside "
+        "this range and is missing at HEAD; retire it with expired or backtracked "
         "instead of deleting the file"
-        for path in sorted(base_paths - head_paths)
+        for path in sorted(_deleted_record_paths(base_paths, head_paths, range_deleted))
     ]
 
 
@@ -207,6 +236,9 @@ def check_range(store: Store, base: str) -> list[str]:
         head_record_paths = set(
             gitutil.tree_record_paths("HEAD", DECISIONS_DIR, root, strict=True)
         )
+        range_deleted = gitutil.deleted_paths_in_range(
+            fork_point, "HEAD", DECISIONS_DIR, root, strict=True
+        )
     except gitutil.GitError as exc:
         return [str(exc)]
 
@@ -225,7 +257,9 @@ def check_range(store: Store, base: str) -> list[str]:
         )
     )
     reasons.extend(
-        _deleted_record_reasons(root, fork_point, base_record_paths, head_record_paths)
+        _deleted_record_reasons(
+            root, fork_point, base_record_paths, head_record_paths, range_deleted
+        )
     )
     return reasons
 
