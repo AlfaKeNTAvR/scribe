@@ -343,6 +343,76 @@ def test_renaming_a_record_file_counts_as_deleted_plus_added(
     assert f"record_deleted: {RATIFIED_A}" in stdout
 
 
+# --- dirty ledger guard, base-tip authority (plan 5.4, V3) ------------------
+
+
+def test_a_dirty_ledger_is_refused(run_cli: RunCli, ledger: Path) -> None:
+    (decisions(ledger) / "scratch.md").write_text("dirty\n", encoding="utf-8")
+
+    code, stdout, _ = run_cli(["check", "--base", "main"], ledger)
+
+    assert code == 1
+    assert "docs/decisions" in stdout
+    assert "uncommitted changes" in stdout
+    assert "--allow-dirty" in stdout
+
+
+def test_a_dirty_ledger_is_allowed_with_the_flag(run_cli: RunCli, ledger: Path) -> None:
+    (decisions(ledger) / "scratch.md").write_text("dirty\n", encoding="utf-8")
+
+    code, stdout, _ = run_cli(["check", "--base", "main", "--allow-dirty"], ledger)
+
+    assert (code, stdout.strip()) == (0, "scribe check: ok")
+
+
+def test_dirty_changes_outside_docs_decisions_do_not_block_the_check(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    write_source(ledger, "src/scratch.py", "value = 1\n")
+
+    code, stdout, _ = run_cli(["check", "--base", "main"], ledger)
+
+    assert (code, stdout.strip()) == (0, "scribe check: ok")
+
+
+def test_a_ratification_added_to_the_target_after_the_fork_is_honoured(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """V3: the predecessor-was-ratified question asks the base ref's tip, not
+    the merge base. This predecessor is unreviewed at the fork point (where
+    `feat` branches off `main`) and only ratified on `main` afterward; the old
+    code substituted the merge base for that question and never saw it. The
+    changed-paths/commits range for "introduces or depends on it" still comes
+    from the merge base, so `feat`'s own delta is what is being asked about.
+    """
+    from scribe.newrecord import slugify
+
+    predecessor_title = json.loads(SPEC_PLAIN.read_text(encoding="utf-8"))["title"]
+    predecessor_alias = today_alias(slugify(predecessor_title))
+    assert run_cli(["new", "--spec", str(SPEC_PLAIN)], ledger)[0] == 0
+    commit_all(ledger, "docs: Record the predecessor, still unreviewed")
+
+    git(ledger, "checkout", "-q", "-b", "feat")
+    spec = json.loads(SPEC_SUPERSEDES.read_text(encoding="utf-8"))
+    spec["supersedes"] = predecessor_alias
+    spec_path = ledger / "successor_spec.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    assert run_cli(["new", "--spec", str(spec_path)], ledger)[0] == 0
+    successor_alias = today_alias(SUCCESSOR_SLUG)
+    commit_all(ledger, "feat: Supersede the not-yet-ratified predecessor")
+
+    git(ledger, "checkout", "-q", "main")
+    assert run_cli(["ratify", predecessor_alias, "--by", "@tester"], ledger)[0] == 0
+    commit_all(ledger, "chore: Ratify the predecessor on main, after the fork")
+
+    git(ledger, "checkout", "-q", "feat")
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"{successor_alias} supersedes ratified {predecessor_alias}" in stdout
+    assert "introduces or depends on it" in stdout
+
+
 # --- argument handling -------------------------------------------------------
 
 

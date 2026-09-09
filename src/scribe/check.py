@@ -58,11 +58,19 @@ def _was_ratified_at_base(store: Store, record: Record, base: str) -> bool:
 
 def _supersede_gate(
     store: Store,
-    base: str,
+    base_tip: str,
     changed_paths: list[str],
     commits: list[str],
 ) -> list[str]:
-    """Rule 1: an unreviewed record overriding a ratified one, introduced or depended on."""
+    """Rule 1: an unreviewed record overriding a ratified one, introduced or depended on.
+
+    `base_tip` is the base ref exactly as given (V3): the predecessor-was-ratified
+    question is asked against the target branch's current tip, not the merge base,
+    so a ratification landed on the target branch after this branch forked is still
+    honoured. `changed_paths` and `commits`, by contrast, are the merge-base range
+    (computed by the caller): only this branch's own deltas count as "introduces or
+    depends on", not unrelated commits the target picked up after the fork.
+    """
     trailer_tokens = _decision_trailer_tokens(commits, store.root)
     changed = set(changed_paths)
     reasons: list[str] = []
@@ -74,7 +82,7 @@ def _supersede_gate(
             continue
         if predecessor.data.get(
             "review_state"
-        ) != "ratified" and not _was_ratified_at_base(store, predecessor, base):
+        ) != "ratified" and not _was_ratified_at_base(store, predecessor, base_tip):
             continue
         alias = str(record.data.get("alias") or "")
         introduced = _relative_to_root(store, record.path) in changed
@@ -171,13 +179,21 @@ def _deleted_record_reasons(store: Store, base: str) -> list[str]:
 
 
 def check_range(store: Store, base: str) -> list[str]:
-    """Every reason this range must not merge, in plan 5.4 rule order."""
+    """Every reason this range must not merge, in plan 5.4 rule order.
+
+    Changed paths and commits come from the merge-base range (`fork_point`):
+    they describe this branch's own delta, not whatever the target branch did
+    on its own after the fork. The predecessor-was-ratified question inside
+    the supersede gate is the one exception (V3): it is asked against `base`
+    itself, the target ref's current tip, so a ratification landed there
+    after the fork is honoured rather than lost.
+    """
     root = store.root
     fork_point = gitutil.merge_base(base, "HEAD", root) or base
-    changed_paths = gitutil.diff_names(base, "HEAD", root)
-    commits = gitutil.rev_list_range(base, "HEAD", root)
+    changed_paths = gitutil.diff_names(fork_point, "HEAD", root)
+    commits = gitutil.rev_list_range(fork_point, "HEAD", root)
 
-    reasons = _supersede_gate(store, fork_point, changed_paths, commits)
+    reasons = _supersede_gate(store, base, changed_paths, commits)
     reasons.extend(_validate_all_records(store))
     reasons.extend(_index_stale(store))
     reasons.extend(_attestation_integrity(store))
@@ -193,11 +209,25 @@ def check_range(store: Store, base: str) -> list[str]:
     return reasons
 
 
-def run_check(base: str, start: str | Path = ".") -> tuple[int, list[str]]:
-    """Exit code and the lines `scribe check` prints."""
+def run_check(
+    base: str, start: str | Path = ".", allow_dirty: bool = False
+) -> tuple[int, list[str]]:
+    """Exit code and the lines `scribe check` prints.
+
+    A dirty ledger is refused by default (V3's cheap interim): this check
+    reads records, attestations and the index off disk, so an uncommitted
+    change under `docs/decisions` could mask or fake a result the committed
+    range does not actually contain. `--allow-dirty` (surfaced by the caller)
+    skips the guard for a caller that knows what it is doing.
+    """
     store = Store.discover(start)
     if store is None or not store.path.is_dir():
         return 1, ["no decision store found (docs/decisions)"]
+    if not allow_dirty and gitutil.is_dirty(DECISIONS_DIR, store.root):
+        return 1, [
+            f"{DECISIONS_DIR} has uncommitted changes; commit them or re-run "
+            "with --allow-dirty"
+        ]
     if gitutil.rev_parse_commit(base, store.root) is None:
         return 1, [f"unknown base ref: {base}"]
     reasons = check_range(store, base)

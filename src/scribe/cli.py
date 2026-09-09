@@ -94,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="the ref this branch is merging into, for example origin/main",
     )
+    check_parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        dest="allow_dirty",
+        help="skip the uncommitted docs/decisions guard (off by default)",
+    )
     lint_parser = subparsers.add_parser(
         "lint",
         help="store-wide rules over every decision record (plan 4.12)",
@@ -316,7 +322,7 @@ def _relink_command(args: argparse.Namespace) -> int:
 def _check_command(args: argparse.Namespace) -> int:
     from scribe.check import run_check
 
-    code, lines = run_check(args.base)
+    code, lines = run_check(args.base, allow_dirty=args.allow_dirty)
     for line in lines:
         print(line)
     return code

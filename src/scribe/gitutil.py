@@ -38,6 +38,12 @@ def staged_paths(cwd: str | Path = ".") -> list[str]:
     return _paths_from_z(result)
 
 
+def is_dirty(pathspec: str, cwd: str | Path = ".") -> bool:
+    """True when `git status --porcelain -- <pathspec>` reports anything at all."""
+    result = _git(cwd, "status", "--porcelain", "--", pathspec)
+    return bool(result.stdout.strip())
+
+
 def git_path(name: str, cwd: str | Path = ".") -> Path | None:
     result = _git(cwd, "rev-parse", "--git-path", name)
     if result.returncode != 0:

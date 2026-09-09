@@ -188,3 +188,7 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 - I104 (V21). The check compares `payload_cwd(payload)` with `repo_root(payload)` from launcher.py, both already resolved Paths.
 - I105 (V21). The `scribe init` hint is unconditional because init always resolves to the repository root before acting; it is advice for future sessions, not a diagnosis of the current one.
 - I106 (V21). No user settings are written; README and both hints name the user-level rule `Edit(**/docs/decisions/RATIFICATIONS.jsonl)` (no leading slash, so it matches at any depth from the user settings file).
+- I107 (V3, worktree agent). Cheap interim only: `scribe check` refuses a dirty `docs/decisions` (exit 1, names `--allow-dirty`) and never looks at the rest of the tree; the revision-backed store stays deferred (effort L).
+- I108 (V3). The dirty guard runs before the unknown-base-ref check, so a dirty ledger is reported even with a wrong `--base`.
+- I109 (V3). `_supersede_gate` takes `base_tip` (the ref as given) for the predecessor-was-ratified question; `changed_paths` and `commits` are now explicitly derived from the merge base. The two-dot `rev_list_range` difference has no dedicated test; flagged as untested-by-difference.
+- I110 (V3). `scribe-check.yml` unchanged: CI checkouts are clean and never need `--allow-dirty`.
