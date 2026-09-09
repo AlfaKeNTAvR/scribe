@@ -201,3 +201,14 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 - I117 (V8). The shared lock keeps the file name `ratify.lock`, defined once as `state.LEDGER_LOCK_FILE`; `ratify.LOCK_FILE` stays as an alias.
 - I118 (V8). New call sites print their lock-timeout line to stderr; ratify still prints its own to stdout (pre-existing, tested); cosmetic inconsistency left for a later pass.
 - I119 (V8). `lint --expire` reports a lock timeout as an error-severity finding `ledger_lock_timeout`, which already makes lint exit 1.
+
+## Owner answers to Q1 to Q6 (interview, 2026-09-09)
+
+- O3. Q1: create the GitHub repository and tag v0.1.0; scribe-check.yml installs with `uvx --from git+https`. Repo creation and push still wait for an explicit go.
+- O4. Q2: yes, `scribe init` also writes `Bash(*scribe ratify*)` and `Bash(*scribe reject*)` deny rules; U2 (does the rule block the skill inline command) is tested live before shipping.
+- O5. Q3: yes, add a fourth scribe-managed shim `post-rewrite` that runs `scribe relink` after amend and rebase, through the same supervisor.
+- O6. Q4: yes, add `engine: pytest` to the verify allowlist; only lint runs verify, with a bounded timeout.
+- O7. Q5: accept the by-construction human-only ratification for now (Q2 rules close the shell path); signed attestations are a possible later follow-up.
+- O8. Q6: keep bognik3@gmail.com as the marketplace owner email.
+- O9. Follow-up work for Q2 to Q4 runs in parallel worktree agents (owner choice), GitHub creation waits for an explicit go.
+- O10. Q2 reversed after the U2 live test (`pipeline/step11_u2_test.sh`, playground 03): with `Bash(*scribe ratify*)` and `Bash(*scribe reject*)` in the project deny list, the human-typed `/scribe:ratify` produced no output at all, while the control run printed "already ratified". Skill inline commands go through the same permission check as agent Bash calls (U2 resolved: they do), so no Bash deny rules are written; ratification stays human-only by construction (O7). The Q2 worktree is discarded.
