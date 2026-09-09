@@ -6,7 +6,7 @@ date: '2026-09-09'
 schema_version: 1
 task_refs: []
 review_state: unreviewed
-effective_state: proposed
+effective_state: implemented
 decided_by: agent-recommended
 recommended_by: claude-code
 ratified_by: null
@@ -23,7 +23,8 @@ affects:
 - {type: path, pattern: tests/conftest.py}
 - {type: path, pattern: tests/test_timing.py}
 - {type: path, pattern: tests/fixtures/**}
-implementation_links: []
+implementation_links:
+- {commit: 27aefbe6dffc, paths: &id001 [tests/conftest.py]}
 tags:
 - tests
 - fixtures
@@ -40,6 +41,8 @@ supersedes: null
 relates_to: []
 history:
 - {at: '2026-09-09T20:33:09Z', event: proposed, by: claude-code, session: session_01A6tVoZuuWqu56QxEqtAjRw}
+- {at: '2026-09-09T20:42:28Z', event: link_added, by: scribe-post-commit, commit: 27aefbe6dffc, field: implementation_links, old: [], new: [{commit: 27aefbe6dffc, paths: *id001}]}
+- {at: '2026-09-09T20:42:28Z', event: implemented, by: scribe-post-commit, commit: 27aefbe6dffc, field: effective_state, old: proposed, new: implemented}
 ---
 
 # Tests keep copying the live docs/decisions ledger as their fixture; a synthetic fixture set and an isolated timing-test purge wait for the first unrelated breakage
