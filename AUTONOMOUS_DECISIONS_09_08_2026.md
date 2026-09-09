@@ -192,3 +192,7 @@ Mode: autonomous, owner-approved five-step pipeline (`research/decision-scribing
 - I108 (V3). The dirty guard runs before the unknown-base-ref check, so a dirty ledger is reported even with a wrong `--base`.
 - I109 (V3). `_supersede_gate` takes `base_tip` (the ref as given) for the predecessor-was-ratified question; `changed_paths` and `commits` are now explicitly derived from the merge base. The two-dot `rev_list_range` difference has no dedicated test; flagged as untested-by-difference.
 - I110 (V3). `scribe-check.yml` unchanged: CI checkouts are clean and never need `--allow-dirty`.
+- I111 (V19, worktree agent). No existing test asserted the pending cap (only `records_written` and `prompt_ids` caps are tested), so only new coverage was added.
+- I112 (V19). `state.push_recent` takes `cap: int | None`; `None` means no truncation. `_register` passes None for `pending_decisions` and keeps the `records_written` cap. Ids leave `pending_decisions` only by post-commit consumption or session expiry.
+- I113 (V19). The 25-id test lives in test_githooks.py and calls `prepare_commit_msg.candidates` directly rather than running 25 real commits.
+- I114 (V19). `test_rejected_and_retired_records_are_not_candidates` flaked once under full-suite load (subprocess result None); passed in isolation and on a second full run; not investigated in this item.

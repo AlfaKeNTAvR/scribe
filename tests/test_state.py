@@ -110,6 +110,10 @@ def test_push_recent_dedups_caps_and_keeps_new_first() -> None:
     assert push_recent([], ["x", "x", "y"], 10) == ["x", "y"]
 
 
+def test_push_recent_with_no_cap_keeps_every_item() -> None:
+    assert push_recent(list(range(30)), [30], cap=None) == [30, *range(30)]
+
+
 # --- lock adapter ------------------------------------------------------------
 
 

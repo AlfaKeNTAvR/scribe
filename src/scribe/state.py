@@ -217,13 +217,18 @@ def session_entry(
     return session
 
 
-def push_recent(items: list[Any], new_items: list[Any], cap: int) -> list[Any]:
-    """Most recent first, deduplicated, capped; `new_items` keep their order."""
+def push_recent(items: list[Any], new_items: list[Any], cap: int | None) -> list[Any]:
+    """Most recent first, deduplicated, `new_items` keep their order.
+
+    `cap` truncates the result; `None` keeps every item (plan 4.9, V19: no cap
+    on `pending_decisions`, ids stay until a commit consumes them or the
+    session is pruned by `prune_sessions`'s existing expiry).
+    """
     result: list[Any] = []
     for item in [*new_items, *items]:
         if item not in result:
             result.append(item)
-    return result[:cap]
+    return result if cap is None else result[:cap]
 
 
 def parse_timestamp(value: Any) -> datetime | None:

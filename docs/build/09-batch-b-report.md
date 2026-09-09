@@ -61,3 +61,7 @@ Done by a Sonnet worktree agent; full section, tests and I-lines (folded in as I
 ## Item 2 (V3)
 
 Done by a Sonnet worktree agent; full section, tests and I-lines (folded in as I107 to I110) in `09-batch-b-item-2.md`. Suite in that worktree: 393 passed, 3 skipped on base a4a721a.
+
+## Item 4 (V19)
+
+Done by a Sonnet worktree agent; full section, tests and I-lines (folded in as I111 to I114) in `09-batch-b-item-4.md`. Suite in that worktree: 391 passed, 3 skipped on base a4a721a.

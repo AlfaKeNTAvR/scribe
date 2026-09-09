@@ -259,13 +259,19 @@ def _history_entry(by: str, session: str | None, at: str) -> dict[str, Any]:
 
 
 def _register(root: Path, session: str | None, record_id: str, at: str) -> None:
-    """Add the ULID to the session's pending decisions and to records_written."""
+    """Add the ULID to the session's pending decisions and to records_written.
+
+    `pending_decisions` is uncapped (plan 4.9, V19): an id stays until a commit
+    consumes it (post-commit's `consume_pending`) or the session itself is
+    pruned by `prune_sessions`'s existing expiry. Only `records_written`, the
+    plan's own recency list, is capped.
+    """
     session_id = session or UNKNOWN_SESSION
 
     def mutate(state: dict[str, Any]) -> None:
         entry = session_entry(state, session_id, at)
         entry["pending_decisions"] = push_recent(
-            entry.get("pending_decisions") or [], [record_id], RECORDS_WRITTEN_CAP
+            entry.get("pending_decisions") or [], [record_id], cap=None
         )
         entry["records_written"] = push_recent(
             entry.get("records_written") or [],

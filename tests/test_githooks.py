@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from scribe.githooks import post_commit as post_commit_module
+from scribe.githooks import prepare_commit_msg
 from scribe.links import add_link, implementation_paths
 from scribe.newrecord import create_record, load_spec
 from scribe.record import Record
@@ -245,6 +246,30 @@ def test_record_only_commit_gets_its_trailer_and_stays_pending(
     assert saved.data["implementation_links"] == []
     assert pending_ids(hooked_repo) == [ulid]
     assert git(hooked_repo, "status", "--porcelain").stdout == ""
+
+
+def test_pending_decisions_has_no_cap_and_all_survive_as_trailer_candidates(
+    hooked_repo: Path,
+) -> None:
+    """V19: the old cap silently dropped ids past the 20th; there is no cap now."""
+    records = [
+        new_pending(hooked_repo, [f"src/batch{i}.py"], f"Batch pending record {i}")
+        for i in range(25)
+    ]
+    ulids = [record.data["id"] for record in records]
+
+    assert len(pending_ids(hooked_repo)) == 25
+    assert set(pending_ids(hooked_repo)) == set(ulids)
+
+    store = Store(hooked_repo)
+    staged = [f"src/batch{i}.py" for i in range(25)]
+    matched = {
+        record.data["id"]
+        for record, origin in prepare_commit_msg.candidates(store, hooked_repo, staged)
+        if origin == "pending"
+    }
+
+    assert matched == set(ulids)
 
 
 def test_implementing_commit_links_from_pending_state(hooked_repo: Path) -> None:
