@@ -1,11 +1,12 @@
 import argparse
 import json
+import sys
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
 from scribe import __version__
-from scribe.index import check_index, write_index
+from scribe.index import locked_check_index, locked_write_index
 from scribe.lookup import lookup
 from scribe.record import Record
 from scribe.schema import Problem, validate_record
@@ -218,13 +219,26 @@ def _index_command(args: argparse.Namespace) -> int:
         print("no decision store found (docs/decisions)")
         return 1
     if args.check:
-        target, up_to_date = check_index(store)
+        # V8: take the ledger lock even to check, and reload records after
+        # acquiring it, so this never compares against an in-memory snapshot
+        # a concurrent writer (new, ratify, post-commit, relink, lint
+        # --expire) has already moved past.
+        target, up_to_date, acquired = locked_check_index(store)
+        if not acquired:
+            print(
+                "scribe index --check: ledger lock timeout; nothing checked",
+                file=sys.stderr,
+            )
+            return 1
         if up_to_date:
             print(f"{_display_path(store, target)} is up to date")
             return 0
         print(f"{_display_path(store, target)} is out of date, run scribe index")
         return 1
-    target, changed = write_index(store)
+    target, changed, acquired = locked_write_index(store)
+    if not acquired:
+        print("scribe index: ledger lock timeout; nothing written", file=sys.stderr)
+        return 1
     action = "wrote" if changed else "unchanged"
     print(f"{action} {_display_path(store, target)}, {len(store.records())} records")
     return 0

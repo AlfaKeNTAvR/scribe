@@ -26,7 +26,7 @@ from typing import Any
 
 from . import gitutil
 from .history_check import check_records_against_base
-from .index import check_index, write_index
+from .index import locked_check_index, locked_write_index, write_index
 from .matching import matches
 from .policy import RULE_NAMES
 from .record import Record
@@ -161,11 +161,27 @@ def _base_findings(store: Store, base: str | None) -> list[Finding]:
 
 
 def _index_findings(store: Store, fix_index: bool) -> list[Finding]:
-    target, up_to_date = check_index(store)
-    if up_to_date:
-        return []
+    """V8: the check (and the `--fix-index` write) happen under the ledger lock,
+    with records reloaded only after the lock is held, so this never compares
+    against, or writes over, a snapshot a concurrent writer (new, ratify,
+    post-commit, relink, lint --expire) has already moved past.
+    """
     if fix_index:
-        write_index(store)
+        target, changed, acquired = locked_write_index(store)
+        if not acquired:
+            print(
+                "scribe lint --fix-index: ledger lock timeout; index not regenerated",
+                file=sys.stderr,
+            )
+            return [
+                Finding(
+                    "error",
+                    "ledger_lock_timeout",
+                    "ledger lock timeout; index not regenerated",
+                )
+            ]
+        if not changed:
+            return []
         return [
             Finding(
                 "info",
@@ -174,6 +190,21 @@ def _index_findings(store: Store, fix_index: bool) -> list[Finding]:
                 _relative(store, target),
             )
         ]
+    target, up_to_date, acquired = locked_check_index(store)
+    if not acquired:
+        print(
+            "scribe lint: ledger lock timeout; index not checked",
+            file=sys.stderr,
+        )
+        return [
+            Finding(
+                "error",
+                "ledger_lock_timeout",
+                "ledger lock timeout; index not checked",
+            )
+        ]
+    if up_to_date:
+        return []
     return [
         Finding(
             "error",
@@ -319,6 +350,13 @@ def _expire_stale(store: Store, today: date) -> list[Finding]:
     On a lock timeout this reports one error finding and one stderr line, and
     changes nothing; `_stale_proposal_findings` still reports the plain
     (un-suffixed) `proposal_stale` warnings from its own pre-lock scan.
+
+    INDEX.md is regenerated here, before the lock is released, rather than
+    left to the separate `_index_findings` pass later in `lint_store`: that
+    pass takes its own lock and reloads from disk, so if this function
+    dropped the lock first, a ratify or another writer could land in the
+    gap and this run's now-stale in-memory snapshot would either overwrite
+    it (with --fix-index) or never get written at all (without it).
     """
     with locked(ledger_lock_path(store.root)) as acquired:
         if not acquired:
@@ -345,6 +383,8 @@ def _expire_stale(store: Store, today: date) -> list[Finding]:
             record.save()
         for record in reconcile_supersession(store.records(), LINT_BY):
             record.save()
+        if stale:
+            write_index(store)
         return findings
 
 

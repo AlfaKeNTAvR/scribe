@@ -253,6 +253,98 @@ def test_a_stale_index_is_an_error_and_fix_index_regenerates_it(
     assert lint(run_cli, lint_repo)[1] == []
 
 
+def test_lint_index_check_lock_timeout_reports_error_and_writes_nothing(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    """V8: plain `scribe lint` (no --fix-index) now checks INDEX.md under the
+    same ledger lock as every writer, reloading records after the lock is
+    held, so it blocks and times out rather than comparing against a stale
+    in-memory snapshot. Fails on the old code: `_index_findings` took no
+    lock at all, so it would run straight through to a normal index_stale
+    finding (or none) instead of `ledger_lock_timeout`, and the elapsed time
+    would not include a 2 s wait.
+    """
+    write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+    index_path = lint_repo / "docs" / "decisions" / "INDEX.md"
+    before = index_path.read_text(encoding="utf-8") if index_path.exists() else None
+    lock_path = ledger_lock_path(lint_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code, stdout, stderr = run_cli(["lint", "--json"], lint_repo)
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    findings = json.loads(stdout)["findings"]
+    assert elapsed >= 2.0
+    assert code == 1
+    assert "ledger lock timeout" in stderr
+    assert "ledger_lock_timeout" in codes(findings)
+    after = index_path.read_text(encoding="utf-8") if index_path.exists() else None
+    assert after == before
+
+
+def test_lint_fix_index_lock_timeout_reports_error_and_writes_nothing(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    """V8: `--fix-index` writes INDEX.md under the ledger lock too. Fails on
+    the old code the same way as the check-only case above: no lock meant
+    `--fix-index` would just regenerate the file immediately.
+    """
+    write_record(lint_repo, "D-260908-sound-choice", ULID_A)
+    index_path = lint_repo / "docs" / "decisions" / "INDEX.md"
+    before = index_path.read_text(encoding="utf-8") if index_path.exists() else None
+    lock_path = ledger_lock_path(lint_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code, stdout, stderr = run_cli(["lint", "--fix-index", "--json"], lint_repo)
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    findings = json.loads(stdout)["findings"]
+    assert elapsed >= 2.0
+    assert code == 1
+    assert "ledger lock timeout" in stderr
+    assert "ledger_lock_timeout" in codes(findings)
+    after = index_path.read_text(encoding="utf-8") if index_path.exists() else None
+    assert after == before
+
+
+def test_expire_regenerates_the_index_without_a_separate_index_run(
+    run_cli: RunCli, lint_repo: Path
+) -> None:
+    """V8: `_expire_stale` writes INDEX.md itself, before releasing the lock.
+
+    Fails on the old code: it left the on-disk index exactly as `scribe
+    index` last wrote it (record shown as an active proposal) until a
+    separate `scribe index` (or `lint --fix-index`) run, so the expired
+    record would not show up under Retired here.
+    """
+    path = write_record(
+        lint_repo,
+        "D-260908-sound-choice",
+        ULID_A,
+        date=days_ago(STALE_PROPOSAL_DAYS + 10),
+    )
+    assert run_cli(["index"], lint_repo)[0] == 0
+
+    code, findings = lint(run_cli, lint_repo, "--expire")
+
+    assert "proposal_stale" in codes(findings)
+    assert Record.load(path).data["effective_state"] == "expired"
+    index_text = (lint_repo / "docs" / "decisions" / "INDEX.md").read_text(
+        encoding="utf-8"
+    )
+    retired_section = index_text.split("## Retired", 1)[1]
+    assert "D-260908-sound-choice" in retired_section
+    assert "expired" in retired_section
+
+
 # --- lifecycle rules ----------------------------------------------------------
 
 

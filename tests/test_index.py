@@ -1,10 +1,13 @@
-from collections.abc import Callable
+import fcntl
 import json
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from scribe.frontmatter import join
 from scribe.index import render_index
+from scribe.state import ledger_lock_path
 from scribe.store import Store
 
 
@@ -114,9 +117,13 @@ def fixture_store(tmp_path: Path) -> Store:
         if record.data.get("review_state") == "ratified":
             attestations.append(
                 {
-                    "id": record.data["id"], "alias": record.data["alias"],
-                    "verdict": "ratified", "by": "@test", "at": f"{record.data['date']}T00:00:00Z",
-                    "via": "cli", "body_sha256": record.body_sha256(),
+                    "id": record.data["id"],
+                    "alias": record.data["alias"],
+                    "verdict": "ratified",
+                    "by": "@test",
+                    "at": f"{record.data['date']}T00:00:00Z",
+                    "via": "cli",
+                    "body_sha256": record.body_sha256(),
                 }
             )
     (decisions / "RATIFICATIONS.jsonl").write_text(
@@ -314,3 +321,53 @@ def test_index_command_reports_a_missing_store(
     code, out, _ = run_cli(["index", str(tmp_path / "nowhere")], tmp_path)
     assert code == 1
     assert "no decision store found" in out
+
+
+def test_index_write_lock_timeout_exits_nonzero_without_writing(
+    tmp_repo: Path, run_cli: Callable[..., tuple[int, str, str]]
+) -> None:
+    """V8: `scribe index` writes under the same ledger lock as new, ratify,
+    post-commit, relink and lint --expire. Fails on the old code: it took no
+    lock at all, so it would write INDEX.md immediately and exit 0 regardless
+    of another writer holding the lock, and the elapsed time would not
+    include a 2 s wait.
+    """
+    index_file = tmp_repo / "docs" / "decisions" / "INDEX.md"
+    assert not index_file.exists()
+    lock_path = ledger_lock_path(tmp_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code, _, stderr = run_cli(["index"], tmp_repo)
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    assert elapsed >= 2.0
+    assert code == 1
+    assert "ledger lock timeout" in stderr
+    assert not index_file.exists()
+
+
+def test_index_check_lock_timeout_exits_nonzero(
+    tmp_repo: Path, run_cli: Callable[..., tuple[int, str, str]]
+) -> None:
+    """V8: `scribe index --check` reads under the ledger lock too, reloading
+    records after acquiring it. Fails on the old code the same way as the
+    write case above (no lock, immediate exit, no 2 s wait).
+    """
+    assert run_cli(["index"], tmp_repo)[0] == 0
+    lock_path = ledger_lock_path(tmp_repo)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with lock_path.open("a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        code, _, stderr = run_cli(["index", "--check"], tmp_repo)
+        elapsed = time.monotonic() - started
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    assert elapsed >= 2.0
+    assert code == 1
+    assert "ledger lock timeout" in stderr

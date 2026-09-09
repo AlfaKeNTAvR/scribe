@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .record import Record
+from .state import ledger_lock_path, locked
 from .store import Store
 
 HEADING = "# Decision index"
@@ -207,3 +208,34 @@ def check_index(store: Store) -> tuple[Path, bool]:
     if not target.exists():
         return target, False
     return target, target.read_text(encoding="utf-8") == render_index(store)
+
+
+# --- lock-guarded entry points (V8) ------------------------------------------
+#
+# `scribe index` and `scribe lint`'s index rule are the only two callers that
+# read or write INDEX.md from outside a lock some other writer (new,
+# post-commit, relink, lint --expire, ratify/reject) already holds; without
+# this they can render from a stale in-memory record list, or a `--fix-index`
+# write can race a concurrent ratify and overwrite it. Both wrappers take the
+# same ledger lock those writers use, reload records from disk only after the
+# lock is held, then delegate to the plain function above. On a lock timeout
+# `acquired` is False and the other two values are meaningless; the caller
+# must not act on them and must write nothing.
+
+
+def locked_check_index(store: Store) -> tuple[Path, bool, bool]:
+    with locked(ledger_lock_path(store.root)) as acquired:
+        if not acquired:
+            return index_path(store), False, False
+        store.records(refresh=True)
+        target, up_to_date = check_index(store)
+        return target, up_to_date, True
+
+
+def locked_write_index(store: Store) -> tuple[Path, bool, bool]:
+    with locked(ledger_lock_path(store.root)) as acquired:
+        if not acquired:
+            return index_path(store), False, False
+        store.records(refresh=True)
+        target, changed = write_index(store)
+        return target, changed, True
