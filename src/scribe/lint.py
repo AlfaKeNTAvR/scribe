@@ -22,7 +22,7 @@ from typing import Any
 
 from . import gitutil
 from .history_check import check_records_against_base
-from .index import ACTIVE_STATES, check_index, write_index
+from .index import check_index, write_index
 from .matching import matches
 from .policy import RULE_NAMES
 from .record import Record
@@ -33,6 +33,11 @@ from .store import Store, reconcile_supersession
 STALE_PROPOSAL_DAYS = 30
 LINT_BY = "scribe-lint"
 DEFAULT_BASES = ("origin/main", "HEAD~1")
+# Deliberately state-based, not `store.effective_authority`: the lifecycle
+# smells below (`review_overdue`, `unreviewed_implemented`) must still fire
+# on records that are not yet ratified, which is the whole point of catching
+# them here before they are.
+ACTIVE_STATES = {"proposed", "implemented", "backtracked"}
 SKIPPED_DIRECTORIES = {".git"}
 
 

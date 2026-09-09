@@ -17,7 +17,6 @@ QUEUE_NOTE = (
     "Ordered: records that supersede a ratified record first, then implemented, "
     "then proposed; newest first within each group."
 )
-ACTIVE_STATES = {"proposed", "implemented", "backtracked"}
 INDEX_FILENAME = "INDEX.md"
 
 
@@ -165,7 +164,7 @@ def render_index(store: Store) -> str:
         state = _retired_state(record, successor_alias)
         if state is not None:
             retired_lines.append(_retired_line(record, state))
-        elif record.data.get("effective_state") in ACTIVE_STATES:
+        elif store.effective_authority(record):
             active_lines.append(_active_line(record))
 
     blocks = [

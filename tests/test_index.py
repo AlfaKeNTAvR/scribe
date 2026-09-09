@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import json
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ def write_fixture_record(
     review: str | None = None,
 ) -> Path:
     data = {
-        "id": f"01M21BV91NZSW1HMJ127KZA{alias[2:5]}",
+        "id": alias,
         "alias": alias,
         "title": f"Title of {alias}",
         "date": date,
@@ -107,7 +108,21 @@ def fixture_store(tmp_path: Path) -> Store:
         effective_state="superseded",
         decided_by="human",
     )
-    return Store(tmp_path)
+    store = Store(tmp_path)
+    attestations = []
+    for record in store.records():
+        if record.data.get("review_state") == "ratified":
+            attestations.append(
+                {
+                    "id": record.data["id"], "alias": record.data["alias"],
+                    "verdict": "ratified", "by": "@test", "at": f"{record.data['date']}T00:00:00Z",
+                    "via": "cli", "body_sha256": record.body_sha256(),
+                }
+            )
+    (decisions / "RATIFICATIONS.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in attestations), encoding="utf-8"
+    )
+    return store
 
 
 def section_lines(text: str, heading: str) -> list[str]:
@@ -150,16 +165,13 @@ def test_queue_line_carries_states_affects_and_title(fixture_store: Store) -> No
     )
 
 
-def test_active_holds_records_without_an_effective_incoming_edge(
+def test_active_holds_only_effectively_attested_authority(
     fixture_store: Store,
 ) -> None:
     text = render_index(fixture_store)
-    assert "## Active decisions (4)" in text
+    assert "## Active decisions (1)" in text
     active = section_lines(text, "## Active decisions")
     assert [line.split(" | ")[0] for line in active] == [
-        "D-260910-supersedes-ratified",
-        "D-260909-implemented-unreviewed",
-        "D-260908-proposed-unreviewed",
         "D-260902-active-predecessor",
     ]
 
@@ -178,15 +190,9 @@ def test_rejected_successor_leaves_its_predecessor_active(
     assert not any(line.startswith("D-260911-rejected-successor") for line in active)
 
 
-def test_active_line_appends_regret_and_review(fixture_store: Store) -> None:
+def test_unattested_record_is_not_active(fixture_store: Store) -> None:
     active = section_lines(render_index(fixture_store), "## Active decisions")
-    line = next(
-        item for item in active if item.startswith("D-260908-proposed-unreviewed")
-    )
-    assert line.endswith(
-        "| Title of D-260908-proposed-unreviewed. Regret: Three of these pile up. "
-        "Review 2026-12-08."
-    )
+    assert not any("D-260908-proposed-unreviewed" in item for item in active)
 
 
 def test_retired_states_cover_edge_rejected_expired_and_stale(

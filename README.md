@@ -134,8 +134,11 @@ default:
   stderr and exits 0, so Claude Code never sees the exit 2 that would deny a
   tool call and git never sees a failed hook. Only a deliberate refusal (a
   gate in `enforce` mode, `commit-msg` under `SCRIBE_COMMIT_MSG: enforce`)
-  is passed through: the application marks it with a `[scribe-deny]` stderr
-  line that the supervisor strips before forwarding the exit code.
+  is passed through: the supervisor gives that invocation a random token and
+  accepts only the matching `[scribe-deny <token>]` stderr line, then forces
+  the documented blocking exit code. Registered hooks use `python3 -I -S`;
+  installed git shims re-exec themselves with those flags before loading the
+  supervisor.
 
 ## Config file
 
@@ -163,7 +166,7 @@ release:
   plugin root and wait for uv through `subprocess.run`, so nothing depends on
   `execvp`. `scribe init` refuses to install anything if `uv` or the shim
   interpreter is not on PATH. The Claude Code hooks in `hooks/hooks.json`
-  are registered as `python3 -I <plugin>/hooks/supervise.py ...`; a Windows
+  are registered as `python3 -I -S <plugin>/hooks/supervise.py ...`; a Windows
   machine whose interpreter is only reachable as `python` needs that command
   name changed, which has not been tried.
 - **Lock adapter untested**: the scratch-state file lock
@@ -193,7 +196,7 @@ The suite has exactly three skips, all in `tests/test_deferred.py`:
 | `test_check_runs_verify_on_committed_content` | Run changed records' `verify` entries against committed content in `scribe check`. | After the same 14-day, zero-`verify_error` period; implement the committed-content runner and replace the assertion stub, then remove the skip. |
 
 `tests/test_timing.py` measures the complete injection subprocess through
-the registered command, `python3 -I <checkout>/hooks/supervise.py hook
+the registered command, `python3 -I -S <checkout>/hooks/supervise.py hook
 pre-tool-use-edit` (which runs `uv run --frozen --project <checkout> scribe
 hook pre-tool-use-edit`), with
 100 generated records plus the three seed records. It prints `warm median`

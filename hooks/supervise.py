@@ -8,9 +8,9 @@ lock), which would turn an infrastructure failure into a denied tool call or a
 blocked commit. This script runs uv, and:
 
 - forwards stdout, stderr and the exit code unchanged when uv exits 0;
-- forwards them unchanged when stderr carries the DENY_MARKER line, which the
-  application prints only for a deliberate enforcement denial (the marker line
-  itself is stripped);
+- forwards them unchanged when stderr carries this invocation's tokened denial
+  marker, which the application prints only for a deliberate enforcement denial
+  (the marker line itself is stripped);
 - otherwise prints one `scribe: ... skipped` line to stderr and exits 0.
 
 Stdlib only, Python 3.8 or newer, no imports from the scribe package: it must
@@ -22,7 +22,7 @@ import os
 import subprocess
 import sys
 
-DENY_MARKER = "[scribe-deny]"
+DENY_MARKER = "[scribe-deny"
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UV = os.environ.get("SCRIBE_UV", "uv")
 
@@ -37,19 +37,25 @@ def run(argv):
     """Run `uv run --frozen --project <plugin root> scribe <argv>` fail-open."""
     label = " ".join(argv[:2]) if argv else "scribe"
     command = [UV, "run", "--frozen", "--project", PLUGIN_ROOT, "scribe"] + list(argv)
+    token = os.urandom(16).hex()
+    environment = dict(os.environ)
+    environment["SCRIBE_DENY_TOKEN"] = token
     try:
-        completed = subprocess.run(command, capture_output=True)
+        completed = subprocess.run(command, capture_output=True, env=environment)
     except OSError as exc:
         return _skip(label, "uv could not start: %s" % exc)
     stderr_lines = completed.stderr.decode("utf-8", errors="replace").splitlines()
-    deliberate = DENY_MARKER in stderr_lines
+    marker = "%s %s]" % (DENY_MARKER, token)
+    deliberate = marker in stderr_lines
     if completed.returncode == 0 or deliberate:
         sys.stdout.buffer.write(completed.stdout)
         sys.stdout.flush()
         for line in stderr_lines:
-            if line != DENY_MARKER:
+            if line != marker:
                 sys.stderr.write(line + "\n")
         sys.stderr.flush()
+        if deliberate:
+            return 1 if argv[:1] == ["git-hook"] else 2
         return completed.returncode
     tail = next((line for line in reversed(stderr_lines) if line.strip()), "")
     return _skip(label, "exit %d: %s" % (completed.returncode, tail.strip()))

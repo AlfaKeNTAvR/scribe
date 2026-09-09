@@ -108,6 +108,19 @@ class Store:
                 latest = item
         return latest
 
+    def effective_authority(self, record: Record) -> bool:
+        """Whether this live record is currently backed by its latest ratification."""
+        latest = self.latest_attestation(record.data.get("id"))
+        if (
+            latest is None
+            or latest.get("verdict") != "ratified"
+            or latest.get("body_sha256") != record.body_sha256()
+            or record.data.get("review_state") != "ratified"
+            or record.data.get("effective_state") not in {"proposed", "implemented"}
+        ):
+            return False
+        return all(predecessor is not record for _, predecessor in self.effective_edges())
+
 
 def attestation_line_problems(text: str) -> list[Problem]:
     """Structural problems in RATIFICATIONS.jsonl content (V5).

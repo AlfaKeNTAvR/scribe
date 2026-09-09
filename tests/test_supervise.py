@@ -1,6 +1,6 @@
 """Codex V1: `hooks/supervise.py` keeps a broken uv from denying tools or commits.
 
-Every test drives the exact registered command shape (`python3 -I
+Every test drives the exact registered command shape (`python3 -I -S
 <plugin>/hooks/supervise.py hook <event>`) or the installed git shim, with `uv`
 replaced by a fake script on PATH where the failure has to be provoked.
 """
@@ -55,7 +55,7 @@ def supervise(
     if path is not None:
         env["PATH"] = path
     return subprocess.run(
-        [sys.executable, "-I", str(SUPERVISOR), *argv],
+        [sys.executable, "-I", "-S", str(SUPERVISOR), *argv],
         input=payload,
         cwd=str(cwd),
         env=env,
@@ -163,7 +163,7 @@ def test_deliberate_deny_is_forwarded_without_the_marker(
 ) -> None:
     fake_uv(
         tmp_path / "bin",
-        f'echo "{protocol.DENY_MARKER}" >&2\necho "blocked: force push" >&2\nexit 2\n',
+        f'echo "{protocol.DENY_MARKER} $SCRIBE_DENY_TOKEN]" >&2\necho "blocked: force push" >&2\nexit 2\n',
     )
     result = supervise(
         ["hook", "gate"], tmp_repo, "{}", path=path_with(tmp_path / "bin", uv=False)
@@ -171,6 +171,27 @@ def test_deliberate_deny_is_forwarded_without_the_marker(
     assert result.returncode == 2
     assert result.stdout == ""
     assert result.stderr.splitlines() == ["blocked: force push"]
+
+
+def test_traceback_marker_impersonation_is_fail_open(tmp_repo: Path, tmp_path: Path) -> None:
+    fake_uv(
+        tmp_path / "bin",
+        'echo "RuntimeError: [scribe-deny]" >&2\nexit 1\n',
+    )
+    result = supervise(
+        ["hook", "gate"], tmp_repo, "{}", path=path_with(tmp_path / "bin", uv=False)
+    )
+    assert result.returncode == 0
+
+
+@pytest.mark.parametrize("argv, expected", [(["hook", "gate"], 2), (["git-hook", "commit-msg"], 1)])
+def test_marker_forces_blocking_status(tmp_repo: Path, tmp_path: Path, argv: list[str], expected: int) -> None:
+    fake_uv(
+        tmp_path / "bin",
+        f'echo "{protocol.DENY_MARKER} $SCRIBE_DENY_TOKEN]" >&2\nexit 0\n',
+    )
+    result = supervise(argv, tmp_repo, "{}", path=path_with(tmp_path / "bin", uv=False))
+    assert result.returncode == expected
 
 
 def test_success_output_is_forwarded_verbatim(tmp_repo: Path, tmp_path: Path) -> None:

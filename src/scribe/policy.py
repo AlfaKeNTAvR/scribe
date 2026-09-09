@@ -137,9 +137,16 @@ def collapse_whitespace(command: str) -> str:
 
 
 def matching_rules(command: str) -> list[str]:
-    """Names of every denylist rule the command triggers, in `RULES` order."""
-    collapsed = collapse_whitespace(command)
-    return [name for name, pattern in RULES if pattern.search(collapsed)]
+    """Names of every denylist rule the command triggers, in `RULES` order.
+
+    Rules may scan arguments in either order, but never borrow an option or a
+    target from a later shell command.  Newlines are command separators too.
+    """
+    segments = [collapse_whitespace(part) for part in re.split(r"\r?\n|;|&&|\|\||\|", command)]
+    return [
+        name for name, pattern in RULES
+        if any(pattern.search(segment) for segment in segments)
+    ]
 
 
 def denied_rule(command: str) -> str | None:

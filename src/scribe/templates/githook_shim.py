@@ -8,6 +8,14 @@ HOOK = "{{HOOK}}"
 
 if os.environ.get("SCRIBE_SKIP_HOOKS") == "1":
     sys.exit(0)
+# A git hook starts through a shebang, unlike the registered Claude hooks.
+# Re-exec under isolated no-site mode before importing the supervisor.  Any
+# failure remains fail-open below.
+if not sys.flags.isolated:
+    try:
+        os.execv(sys.executable, [sys.executable, "-I", "-S", __file__, *sys.argv[1:]])
+    except Exception:
+        pass
 # The supervisor runs `uv run ... scribe git-hook <name>` fail-open: a uv or
 # startup failure exits 0 with one stderr line, so a broken tool never blocks
 # a commit; only a deliberate refusal (commit-msg in enforce mode) exits 1.

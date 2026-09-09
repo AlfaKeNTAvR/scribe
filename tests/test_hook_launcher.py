@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = PROJECT_ROOT / "tests" / "fixtures" / "hooks"
 HOOK_ARGS_PREFIX = [
     "-I",
+    "-S",
     "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
     "hook",
 ]

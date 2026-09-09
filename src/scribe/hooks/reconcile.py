@@ -27,6 +27,7 @@ from scribe.hooks.launcher import (
     repo_root,
     store_for,
 )
+from scribe.config import gates_mode
 from scribe.record import utc_now
 from scribe.state import load_state, parse_timestamp, session_entry, update_state
 
@@ -68,6 +69,7 @@ def task_completed(root: Path, payload: dict[str, Any]) -> Verdict | None:
         return None
     now = utc_now()
     captured: dict[str, Any] = {}
+    enforce = gates_mode(root) == "enforce"
 
     def mutate(state: dict[str, Any]) -> None:
         session = session_entry(state, session_id, now)
@@ -75,7 +77,8 @@ def task_completed(root: Path, payload: dict[str, Any]) -> Verdict | None:
         if isinstance(flag, dict):
             captured["flag"] = flag
             captured["satisfied"] = record_written_since(session, flag.get("set_at"))
-        session["decision_worthy"] = None
+        if captured.get("satisfied") or not enforce:
+            session["decision_worthy"] = None
 
     update_state(root, mutate, now)
     flag = captured.get("flag")

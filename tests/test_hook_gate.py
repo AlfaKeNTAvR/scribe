@@ -9,6 +9,7 @@ from scribe.hooks import pre_tool_use_gate, reconcile
 from scribe.hooks.launcher import POLICY_ADVISORY, POLICY_GATE
 from scribe.record import Record
 from scribe.state import load_state, session_entry, update_state
+from scribe.store import Store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = PROJECT_ROOT / "tests" / "fixtures" / "hooks"
@@ -56,6 +57,18 @@ def write_ratified_action_record(root: Path, rule_name: str) -> None:
         }
     )
     record.save()
+    attestation = {
+        "id": record.data["id"],
+        "alias": record.data["alias"],
+        "verdict": "ratified",
+        "by": "@tester",
+        "at": "2026-09-08T21:00:00Z",
+        "via": "cli",
+        "body_sha256": record.body_sha256(),
+    }
+    (root / "docs" / "decisions" / "RATIFICATIONS.jsonl").write_text(
+        json.dumps(attestation) + "\n", encoding="utf-8"
+    )
 
 
 def seed_session(root: Path, **fields: object) -> None:
@@ -75,7 +88,6 @@ def seed_session(root: Path, **fields: object) -> None:
         ("git push -f", "git-push-force"),
         ("git push origin main --force", "git-push-force"),
         ("git status && git push --force", "git-push-force"),
-        ("git   push\n  --force", "git-push-force"),
         ("git branch -D feature", "git-branch-delete-force"),
         ("git reset --hard origin/main", "git-reset-hard-remote"),
         ("rm -rf /tmp/scratch", "rm-rf-outside-worktree"),
@@ -118,6 +130,8 @@ def test_denylist_matches(command: str, expected: str) -> None:
         "git branch -d feature",
         "git reset --hard HEAD~1",
         "git reset origin/main",
+        "git   push\n  --force",
+        "rm build\nprintf '%s\\n' -rf /tmp/example",
         "rm -rf build",
         "rm -rf ./build",
         "rm -r build/",
@@ -267,6 +281,24 @@ def test_unratified_or_two_way_door_action_record_does_not_allow(
     record = Record.load(path)
     record.data["reversibility"] = "two-way-door"
     record.save()
+    assert not pre_tool_use_gate.action_is_ratified(Store(tmp_repo), "git-push-force")
+
+
+@pytest.mark.parametrize("change", ["unattested", "expired", "superseded", "body_hash_mismatch"])
+def test_action_authority_requires_live_matching_attestation(tmp_repo: Path, change: str) -> None:
+    write_ratified_action_record(tmp_repo, "git-push-force")
+    path = tmp_repo / "docs" / "decisions" / "D-260908-allow-the-action.md"
+    if change == "unattested":
+        (tmp_repo / "docs" / "decisions" / "RATIFICATIONS.jsonl").write_text("", encoding="utf-8")
+    else:
+        record = Record.load(path)
+        if change == "expired":
+            record.data["effective_state"] = "expired"
+        elif change == "superseded":
+            record.data["effective_state"] = "superseded"
+        else:
+            record.body += "changed\n"
+        record.save()
     assert not pre_tool_use_gate.action_is_ratified(Store(tmp_repo), "git-push-force")
     record = Record.load(path)
     record.data.update({"reversibility": "one-way-door", "review_state": "unreviewed"})
@@ -465,6 +497,7 @@ def test_task_completed_enforce_exits_two(
         "flagged decision-worthy (dependency) but no record was written"
         in result.stderr
     )
+    assert session_state(tmp_repo)["decision_worthy"] is not None
 
 
 def test_task_completed_allows_after_record_written(

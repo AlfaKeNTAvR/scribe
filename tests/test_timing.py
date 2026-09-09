@@ -1,6 +1,6 @@
 """Wall-clock budget of the PreToolUse injection hook (plan 7 item 5, F19).
 
-Measures the whole registered command, `python3 -I <plugin>/hooks/supervise.py
+Measures the whole registered command, `python3 -I -S <plugin>/hooks/supervise.py
 hook pre-tool-use-edit` (which runs `uv run --frozen --project <plugin> scribe
 hook pre-tool-use-edit`), against a store of 100 generated records plus the
 three real ones. The two measurements bypass pytest capture so `-q` shows
@@ -77,6 +77,7 @@ def timed_hook_run(
         [
             python3,
             "-I",
+            "-S",
             str(PROJECT_ROOT / "hooks" / "supervise.py"),
             "hook",
             "pre-tool-use-edit",

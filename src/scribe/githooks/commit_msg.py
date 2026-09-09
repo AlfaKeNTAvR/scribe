@@ -25,8 +25,6 @@ from scribe.record import Record
 from scribe.schema import validate_record
 from scribe.store import Store
 
-ACTIVE_STATES = {"proposed", "implemented", "backtracked"}
-
 
 @dataclass(frozen=True)
 class Finding:
@@ -94,15 +92,8 @@ def validate_records(store: Store, records: list[Record]) -> list[Finding]:
 
 
 def active_records(store: Store) -> list[Record]:
-    """Active as INDEX.md defines it: not rejected, live state, no effective incoming edge."""
-    superseded = {id(predecessor) for _, predecessor in store.effective_edges()}
-    return [
-        record
-        for record in store.records()
-        if record.data.get("review_state") != "rejected"
-        and record.data.get("effective_state") in ACTIVE_STATES
-        and id(record) not in superseded
-    ]
+    """Records with effective ratified authority, shared with the gate and index."""
+    return [record for record in store.records() if store.effective_authority(record)]
 
 
 def governed_paths(

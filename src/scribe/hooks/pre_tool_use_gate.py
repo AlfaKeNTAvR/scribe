@@ -41,9 +41,7 @@ def action_is_ratified(store: Store, rule_name: str) -> bool:
     """True when a ratified one-way-door record claims the action (plan 4.7 item 2, F2)."""
     for record in store.records():
         data = record.data
-        if data.get("review_state") != "ratified":
-            continue
-        if data.get("reversibility") != "one-way-door":
+        if data.get("reversibility") != "one-way-door" or not store.effective_authority(record):
             continue
         affects = data.get("affects")
         if not isinstance(affects, list):
@@ -101,7 +99,13 @@ def plan_verdict(
             }
             pending.extend(session.get("pending_decisions") or [])
 
-        update_state(root, mutate, now)
+        # `update_state` returns the on-disk state even when its lock timed
+        # out and the mutation was dropped.  Read pending decisions from that
+        # returned snapshot, rather than relying on the callback having run.
+        state = update_state(root, mutate, now)
+        session = state.get("sessions", {}).get(session_id)
+        if isinstance(session, dict):
+            pending = list(session.get("pending_decisions") or [])
     if pending:
         return Verdict(True, "", event)
     return Verdict(False, PLAN_REASON.format(areas=", ".join(areas)), event)

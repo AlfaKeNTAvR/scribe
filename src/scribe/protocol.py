@@ -10,13 +10,16 @@ this package; `tests/test_supervise.py` keeps them equal.
 
 from __future__ import annotations
 
+import os
 import sys
 
-DENY_MARKER = "[scribe-deny]"
+DENY_MARKER = "[scribe-deny"
 
 
 def announce_deny(reason: str) -> None:
     """Write the marker line and the human-readable reason to stderr."""
-    print(DENY_MARKER, file=sys.stderr)
+    token = os.environ.get("SCRIBE_DENY_TOKEN")
+    if token:
+        print(f"{DENY_MARKER} {token}]", file=sys.stderr)
     print(reason, file=sys.stderr)
     sys.stderr.flush()
