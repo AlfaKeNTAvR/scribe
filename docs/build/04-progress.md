@@ -17,8 +17,8 @@ No implementation tasks had been completed at the start of this session.
 | T10 | done | Fable 5.1 subagent. Shadow logs gate_verdict deny and exits 0, enforce exits 2 with denylist message, ratified action record allows, force-with-lease allows, ExitPlanMode sets decision_worthy, TaskCompleted logs capture_missing; 90 tests. Main session re-ran the suite: 248 passed. |
 | T11 | done | Fable 5.1 subagent. AT clauses (a) to (h) each covered by a named test; hooks installed as sys.executable -m scribe git-hook files; 13 tests plus 1 deferred skip. Main session fixed a same-second amend flake in two tests (GIT_COMMITTER_DATE) and re-ran: 285 passed, 2 skipped. |
 | T12 | done | Opus 5 subagent. `check --base` fails on unreviewed-supersedes-ratified, deleted attestation line, rewritten body (immutable_changed), affects-only branch (F11); passes after ratify and on plain unreviewed; `scribe check --base 3a5b1d2` on this repo: ok; 9 tests plus 1 deferred skip. |
-| T13 | todo | Not run. |
-| T14 | todo | Not run. |
+| T13 | done | Opus 5 subagent. Every 4.12 rule code has a fixture test; `scribe lint` on this repo: 3 records, 0 errors, 0 warnings, 0 info; `--expire` sets expired and restores the predecessor; 25 tests. |
+| T14 | done | Fable 5.1 subagent. Nine managed paths, idempotent `unchanged`, foreign hook kept unless --force, core.hooksPath and missing-uv preflight exit 1, shim adds a trailer through real uv, F6 workflow line exits 1 on the supersede branch; 21 tests. Main session re-ran the suite: 331 passed, 2 skipped. |
 | T15 | todo | Not run. |
 | T16 | todo | Not run. |
 
