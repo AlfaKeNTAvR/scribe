@@ -81,6 +81,10 @@ def build_parser() -> argparse.ArgumentParser:
             default="cli",
             help="path the verdict came through (default cli)",
         )
+    subparsers.add_parser(
+        "relink",
+        help="rebuild implementation_links from git history (plan 5.3, F15)",
+    )
     check_parser = subparsers.add_parser(
         "check",
         help="CI merge gate over a commit range (plan 5.4)",
@@ -299,6 +303,16 @@ def _verdict_command(args: argparse.Namespace) -> int:
     return outcome.code
 
 
+def _relink_command(args: argparse.Namespace) -> int:
+    del args
+    from scribe.relink import run_relink
+
+    code, lines = run_relink()
+    for line in lines:
+        print(line)
+    return code
+
+
 def _check_command(args: argparse.Namespace) -> int:
     from scribe.check import run_check
 
@@ -368,6 +382,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _new_command(args)
     if args.command in ("ratify", "reject"):
         return _verdict_command(args)
+    if args.command == "relink":
+        return _relink_command(args)
     if args.command == "check":
         return _check_command(args)
     if args.command == "init":

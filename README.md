@@ -1,5 +1,172 @@
 # scribe
 
-Scribe records agent decisions, links them to code, and keeps a review queue for human ratification.
+Scribe records agent decisions, links them to code, injects them before edits,
+and keeps a review queue for human ratification. It ships as a Claude Code
+plugin (skills and hooks) plus a Python CLI, and installs its own git hooks
+into a target repository through `scribe init`.
 
-This repository is under active development. Run `uv run scribe --version` to verify the local installation.
+This document is plain and factual: what each piece does, what it does not
+do, and where it can fail quietly. Full behavioural spec:
+`docs/build/03-plan-v2.md` (referenced below as "the plan").
+
+## Install
+
+Local development, from this checkout:
+
+```
+claude --plugin-dir ~/scribe
+```
+
+then, inside a running Claude Code session, run `/reload-plugins` to pick up
+changes without restarting.
+
+Once scribe is published to a marketplace, install it the normal way (`/plugin
+marketplace add <source>` then `/plugin install scribe`) and re-run the
+install after any version bump: third-party plugins do not auto-update.
+
+Installing the plugin gives you the five skills and the Claude Code hooks
+(`hooks/hooks.json`). It does **not** touch any git repository. To add
+scribe's git hooks, CI check and config to a project, run `scribe init` inside
+that project's repository (see below).
+
+## CLI reference
+
+Every subcommand is `uv run scribe <command> ...` from this checkout (or
+`scribe <command> ...` once the console script is on PATH inside a `uv`
+environment that has scribe installed).
+
+| Command | What it does |
+|---|---|
+| `validate [paths...]` | Validates one or more decision records (or every record under `docs/decisions` with no argument) against the schema in the plan, section 3. |
+| `index [path]` | Regenerates `docs/decisions/INDEX.md`. `--check` exits 1 instead of writing when the file on disk is stale. |
+| `lookup <token>` | Reverse lookup: a commit-ish shows the records its `Decision:` trailers name; a ULID or alias shows the commits and `implementation_links` for that record. |
+| `new --spec <file>` | Writes a new decision record from a JSON spec (used by `/scribe:decide`). `--register` adds the new id to a session's pending decisions so the next commit picks it up. |
+| `ratify <alias-or-ulid> [note]` | Records a human ratification verdict: appends to `RATIFICATIONS.jsonl`, updates the record, runs supersession reconciliation. |
+| `reject <alias-or-ulid> [note]` | Same as `ratify`, verdict `rejected`. |
+| `check --base <ref>` | The CI merge gate: fails a pull request that introduces or depends on an unreviewed record superseding a ratified one, or that breaks the append-only or immutability rules. |
+| `lint` | Store-wide rules over every record: stale index, immutable-field changes, unattested review states, expired proposals, `verify` entries, and more (plan section 4.12). |
+| `init [--force] [--hooks-dir DIR] [--ci-source SPEC]` | Installs the git hook shims, `.claude/scribe/config.json`, the `RATIFICATIONS.jsonl` deny rule in `.claude/settings.json`, and (with `--ci-source`) the `scribe-check.yml` workflow, into the current repository. |
+| `relink` | Rebuilds every record's `implementation_links` from git history: reachable linked commits are kept and refreshed, unreachable ones (post-amend, post-rebase) are dropped, missing ones are added. No range option; always looks at the whole history. |
+| `hook <event>` | Entry point for a Claude Code hook; reads the event payload as JSON on stdin. Not meant to be run by hand. |
+| `git-hook <name> [args...]` | Entry point for a git hook (`prepare-commit-msg`, `commit-msg`, `post-commit`); this is what the shims `scribe init` writes actually call. Not meant to be run by hand. |
+| `--version` | Prints the installed scribe version and the path it was loaded from. |
+
+## Record format
+
+Decision records live at `docs/decisions/D-<slug>.md`: YAML front matter plus
+a fixed body (Question, Criteria, Constraints and assumptions, Options
+considered, Decision, Consequences, Evidence, and an optional Attempted and
+failed section). The full field table, the immutable versus mutable key
+split, history entry shape, and the body rules are the plan, sections 3.1
+through 3.6. `docs/decisions/INDEX.md` (section 3.5) is generated, never
+hand-edited.
+
+Never edit a record's body by hand after its first commit: the body is
+immutable, and every change to a mutable field (`review_state`,
+`effective_state`, `ratified_by`, `ratified_at`, `implementation_links`,
+`supersedes`, `history`) must go through a scribe command so it appends a
+history entry. Never edit `docs/decisions/RATIFICATIONS.jsonl` by hand either;
+see the ratification model below.
+
+## Ratification model
+
+`docs/decisions/RATIFICATIONS.jsonl` is committed and append only, one JSON
+object per line:
+
+```json
+{"id": "01M21BV91NZSW1HMJ127KZAA5J", "alias": "D-260908-unreviewed-may-supersede-ratified", "verdict": "ratified", "by": "@nikita", "at": "2026-09-08T20:37:41Z", "body_sha256": "<hex>", "via": "hand-written", "note": "Interview answer A10"}
+```
+
+`verdict` in `ratified`, `rejected`; `via` in `skill`, `cli`, `hand-written`,
+set from the CLI flag `--via` (default `cli`; the skills pass `--via skill`).
+The latest line for an `id` is authoritative. Validator rule 6 makes a
+record's `review_state` worthless without a matching line, so editing a
+record alone cannot ratify it.
+
+What this file is and is not: `scribe init` adds
+`Edit(/docs/decisions/RATIFICATIONS.jsonl)` to `permissions.deny` in the
+target repo's `.claude/settings.json`; the leading `/` anchors at the
+settings source (the repository root) and an `Edit` rule also covers the
+`Write` tool (Claude Code 2.1.228 or later; `Write(...)` path rules are
+accepted but never consulted, so none is written). This blocks the agent's
+file tools. It does not block a subprocess: an agent could run `scribe
+ratify` through Bash. In this release, human-only ratification is by
+construction of the skills (`/scribe:ratify` and `/scribe:reject` carry
+`disable-model-invocation: true`), not by proof; the attestation line records
+who ran the verdict and through which path (`via`).
+
+## Denylist
+
+The `PreToolUse` gate on `Bash|PowerShell` matches commands against a fixed
+set of irreversible-action rules (`src/scribe/policy.py`): force-pushing,
+force-deleting a branch, `git reset --hard` against a remote-tracking branch,
+`rm -rf` outside the worktree, running a database migration (alembic, prisma,
+flyway), `terraform apply`/`destroy`, `kubectl apply`/`delete`, `helm
+install`/`upgrade`, `docker push`, publishing a package (npm/pnpm/yarn,
+cargo, twine, `uv publish`), creating a GitHub release, merging a GitHub pull
+request, and writing HTTP requests (curl/wget/http with a write method or a
+request body). A decision record can also declare its own `affects` entry of
+`{type: action, pattern: <rule-name>}` to tie a rule to a specific decision.
+
+## Fail-open policy
+
+Every Claude Code hook this plugin registers is advisory or shadow-mode by
+default:
+
+- The `SessionStart`, `UserPromptSubmit` and `PreToolUse Edit|Write`
+  (injection) hooks are advisory: any internal failure is caught, logged to
+  `.claude/scribe/hook-errors.log`, and the hook exits 0. A broken hook never
+  blocks an edit.
+- The `PreToolUse ExitPlanMode`/`Bash|PowerShell` gate and the
+  `TaskCompleted`/`Stop` reconcile hooks run in shadow mode: they compute a
+  verdict, log it to `.claude/scribe/gate-log.jsonl`, and still exit 0. They
+  only start blocking once a repository's `.claude/scribe/config.json` sets
+  `SCRIBE_GATES: enforce`; `scribe init` never sets this itself.
+- The git hooks (`prepare-commit-msg`, `commit-msg`, `post-commit`) never
+  fail a commit in this release: exceptions are logged and the hook exits 0.
+  `commit-msg` prints warnings by default (`SCRIBE_COMMIT_MSG: warn`); an
+  `enforce` value in the same config file turns three of its checks fatal.
+
+## Config file
+
+`.claude/scribe/config.json`, written once by `scribe init` and never
+overwritten again after that (a hand edit is never clobbered):
+
+```json
+{"version": 1, "SCRIBE_GATES": "shadow", "SCRIBE_COMMIT_MSG": "warn"}
+```
+
+`SCRIBE_GATES` is `shadow` (default) or `enforce`. `SCRIBE_COMMIT_MSG` is
+`warn` (default) or `enforce`. The file is git-ignored (`scribe init` adds
+`.claude/scribe/` to `.gitignore`), so these switches are local to a clone and
+can never be flipped by an inherited environment variable.
+
+## Windows caveats
+
+Windows is best effort by construction (Python via `uv`, forward-slash paths,
+exec-form hooks, no bash), not tested against a real Windows machine in this
+release:
+
+- **Shim interpreter**: the git hook shims `scribe init` writes use
+  `#!/usr/bin/env python3` on POSIX and `#!/usr/bin/env python` on Windows
+  (`os.name == "nt"` at init time), and replace `os.execvp` with
+  `subprocess.call` plus `sys.exit(code)` because `execvp` does not replace
+  the process on Windows. `scribe init` refuses to install anything if `uv`
+  or the shim interpreter is not on PATH.
+- **Lock adapter untested**: the scratch-state file lock
+  (`src/scribe/state.py`) uses `fcntl.flock` on POSIX and `msvcrt.locking` on
+  Windows. The Windows branch is exercised only against a faked `msvcrt`
+  module in unit tests, never against real Windows file locking.
+- **PowerShell tool matcher**: the `Bash|PowerShell` gate's denylist patterns
+  (`src/scribe/policy.py`) are written and tested against bash-style command
+  strings. They also match the equivalent PowerShell spellings the rules
+  anticipate (`npm.cmd`, `-X`/`--request`, and so on), but the matcher itself
+  has not been run against a live PowerShell session.
+
+## Tests
+
+`uv run pytest -q` from this repository. Two tests are permanently
+skip-marked pending a documented activation condition: `commit-msg` and
+`scribe check` running `verify` entries against staged or committed content
+(`tests/test_deferred.py`), enabled after 14 days of dogfooding `scribe lint`
+with zero `verify_error`.

@@ -1,0 +1,15 @@
+{
+  "name": "scribe",
+  "owner": {
+    "name": "Nikita Boguslavskii",
+    "email": "bognik3@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "scribe",
+      "source": "./",
+      "description": "Records agent decisions, links them to code, injects them before edits, queues them for human ratification.",
+      "version": "0.1.0"
+    }
+  ]
+}
