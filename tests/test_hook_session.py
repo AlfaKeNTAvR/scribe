@@ -102,6 +102,48 @@ def test_session_start_skips_unparseable_record(
     assert "D-260909-broken.md" in log
 
 
+def test_session_start_skips_a_record_with_non_string_supersedes(
+    run_hook: RunHook, tmp_repo: Path
+) -> None:
+    """V17 follow-up: `supersedes: []` parses as valid YAML front matter, so the
+    old loader (which only catches `FrontMatterError`/`OSError`) lets it through
+    unchanged. `review_queue_counts` then does
+    `mapping.get("supersedes") in ratified_keys`, a *set* membership test that
+    raises `TypeError: unhashable type: 'list'` for this record - taking the
+    whole review-queue count down with it. The `run_hook(...)` call below is
+    what fails on the old code (a non-zero exit or the fail-open supervisor
+    swallowing the hook entirely), not the assertions after it.
+    """
+    store = tmp_repo / "docs" / "decisions"
+    make_unreviewed_copy(store, "D-260909-plain", "01M21BV91NZSW1HMJ127KZAA5M", None)
+    source = next(store.glob("D-*.md"))
+    record = Record.load(source)
+    record.path = store / "D-260909-bad-supersedes.md"
+    record.data.update(
+        {
+            "id": "01M21BV91NZSW1HMJ127KZAA5N",
+            "alias": "D-260909-bad-supersedes",
+            "review_state": "unreviewed",
+            "ratified_by": None,
+            "ratified_at": None,
+            "supersedes": [],
+        }
+    )
+    record.save()
+    result = run_hook(
+        "session-start", load_fixture("session_start.json", tmp_repo), tmp_repo
+    )
+    assert result.returncode == 0
+    assert "1 unreviewed decisions, 0 supersede" in result.stdout
+    log = (tmp_repo / ".claude" / "scribe" / "hook-errors.log").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "scribe: skipped D-260909-bad-supersedes.md: supersedes must be a "
+        "string or null" in log
+    )
+
+
 def test_review_queue_counts_use_ulid_or_alias() -> None:
     mappings = [
         {"id": "A", "alias": "D-260901-a", "review_state": "ratified"},

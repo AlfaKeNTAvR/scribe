@@ -368,6 +368,36 @@ def test_unparsable_record_is_skipped_and_logged(tmp_repo: Path) -> None:
     assert "scribe: skipped D-260909-broken.md" in log
 
 
+def test_malformed_review_state_is_skipped_and_injection_still_works(
+    tmp_repo: Path,
+) -> None:
+    """V17 follow-up: `review_state: []` parses as valid YAML front matter, so
+    the old loader (which only catches `FrontMatterError`/`OSError`) lets it
+    through unchanged. `governing_records`'s sort key then does
+    `REVIEW_ORDER.get(mapping.get("review_state"), ...)`, a dict lookup that
+    raises `TypeError: unhashable type: 'list'` for this record - and because
+    `governing_records` sorts every matched record in one pass, that one bad
+    record's crash propagates out of `handle()` and suppresses the whole
+    injection block, including the good record. The `handle(...)` call below,
+    not the assertions after it, is what fails on the old code.
+    """
+    store = tmp_repo / "docs" / "decisions"
+    write_variant(
+        store,
+        "D-260909-bad-review",
+        ulid_with_suffix("Z1"),
+        review_state=[],
+    )
+    context = context_of(
+        handle(edit_payload(tmp_repo, tmp_repo / "src/scribe/index.py"))
+    )
+    assert INDEX_RECORD in context
+    log = error_log_path(tmp_repo).read_text(encoding="utf-8")
+    assert (
+        "scribe: skipped D-260909-bad-review.md: review_state must be a string" in log
+    )
+
+
 def test_large_record_body_is_not_decoded_by_injection(tmp_repo: Path) -> None:
     record_path = tmp_repo / "docs" / "decisions" / f"{INDEX_RECORD}.md"
     front_matter = record_path.read_bytes().split(b"\n---\n", 1)[0] + b"\n---\n"

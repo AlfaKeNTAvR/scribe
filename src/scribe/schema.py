@@ -345,6 +345,33 @@ def _enum(mapping: dict[str, Any], key: str, allowed: set[str], error: Any) -> N
         error("invalid_enum", f"{key} must be one of {', '.join(sorted(allowed))}")
 
 
+def unhashable_enum_reason(mapping: dict[str, Any]) -> str | None:
+    """First reason `review_state`, `effective_state` or `supersedes` would crash a
+    set/dict lookup downstream, else None (V17 follow-up).
+
+    `Store.effective_edges`, `Store.effective_authority`, `reconcile_supersession`
+    and lint's `ACTIVE_STATES` check all test these fields for set membership or use
+    them as dict keys; `session_start` and `pre_tool_use_edit` build similar sets in
+    their own record loaders. A record whose front matter parses as valid YAML but
+    gives one of these fields a list or dict value (e.g. `effective_state: []`) is
+    hashable-clean YAML and not a `FrontMatterError`, so it survives `Record.load`
+    and then raises `TypeError: unhashable type` the moment any of those callers
+    touch it - taking every other record in the same pass down with it. This check
+    is deliberately narrower than `validate_record`: it only guards the type shape
+    that would otherwise crash, not full schema conformance, so a record that is
+    merely the wrong enum *value* (still a string) is left for `validate_record` to
+    report through the normal `scribe validate` path.
+    """
+    if not _is_str(mapping.get("review_state")):
+        return "review_state must be a string"
+    if not _is_str(mapping.get("effective_state")):
+        return "effective_state must be a string"
+    supersedes = mapping.get("supersedes")
+    if supersedes is not None and not _is_str(supersedes):
+        return "supersedes must be a string or null"
+    return None
+
+
 def _nullable_string(mapping: dict[str, Any], key: str, error: Any) -> None:
     if mapping.get(key) is not None and not _is_str(mapping.get(key)):
         error("invalid_type", f"{key} must be a string or null")

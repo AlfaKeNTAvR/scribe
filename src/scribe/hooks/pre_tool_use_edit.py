@@ -22,6 +22,7 @@ _START = time.monotonic()
 from scribe.frontmatter import split
 from scribe.hooks.launcher import payload_cwd, repo_root, store_for
 from scribe.matching import matches_affects, to_repo_relative
+from scribe.schema import unhashable_enum_reason
 from scribe.state import log_hook_error
 from scribe.store import Store
 
@@ -67,7 +68,16 @@ def target_path(payload: dict[str, Any]) -> str | None:
 
 
 def load_front_matters(store: Store) -> list[dict[str, Any]] | None:
-    """Front matter of every record; None when the deadline expires while loading."""
+    """Front matter of every record; None when the deadline expires while loading.
+
+    V17 follow-up: also skips and logs a record whose `review_state`,
+    `effective_state` or `supersedes` is not a string (e.g. `effective_state: []`),
+    the same check `Store.records()` and `session_start` apply. This loader's own
+    downstream sets (`ACTIVE_EFFECTIVE_STATES` and friends, all tuples matched by
+    equality) already tolerate such a value without crashing, but skipping it here
+    too keeps every raw-front-matter loader in the codebase agreeing on what counts
+    as a malformed record.
+    """
     mappings: list[dict[str, Any]] = []
     for count, path in enumerate(sorted(store.path.glob("D-*.md")), start=1):
         if count % DEADLINE_CHECK_EVERY == 0 and deadline_passed():
@@ -82,6 +92,10 @@ def load_front_matters(store: Store) -> list[dict[str, Any]] | None:
             mapping, _ = split(b"".join(lines).decode("utf-8"))
         except (OSError, ValueError) as exc:
             log_hook_error(store.root, f"scribe: skipped {path.name}: {exc}")
+            continue
+        reason = unhashable_enum_reason(mapping)
+        if reason is not None:
+            log_hook_error(store.root, f"scribe: skipped {path.name}: {reason}")
             continue
         mappings.append(mapping)
     return mappings

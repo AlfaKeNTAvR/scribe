@@ -169,16 +169,24 @@ def test_git_utilities_normalize_git_results(
     nested.mkdir(parents=True)
     responses = {
         ("rev-parse", "--show-toplevel"): str(tmp_path / "repo") + "\n",
-        ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"): (
-            "src/a.py\0dir\\b.py\0"
-        ),
         ("rev-parse", "--git-path", "hooks"): "../.git/hooks\n",
+    }
+    byte_responses = {
+        ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"): (
+            b"src/a.py\0dir\\b.py\0"
+        ),
     }
 
     def fake_git(cwd: str | Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess([], 0, responses[args], "")
 
+    def fake_git_bytes(
+        cwd: str | Path, *args: str
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess([], 0, byte_responses[args], b"")
+
     monkeypatch.setattr("scribe.gitutil._git", fake_git)
+    monkeypatch.setattr("scribe.gitutil._git_bytes", fake_git_bytes)
     assert toplevel(nested) == tmp_path / "repo"
     assert staged_paths(nested) == ["src/a.py", "dir\\b.py"]
     assert git_path_hooks(nested) == tmp_path / "repo" / ".git" / "hooks"
@@ -201,6 +209,53 @@ def test_records_skips_a_malformed_file_and_logs_instead_of_raising(
     assert [record.data["alias"] for record in records] == ["D-260908-good"]
     log = error_log_path(tmp_path).read_text(encoding="utf-8")
     assert "scribe: skipped D-260909-broken.md" in log
+
+
+def test_records_skips_a_record_with_a_list_effective_state(tmp_path: Path) -> None:
+    """V17 follow-up: `effective_state: []` parses as valid YAML, so the old
+    `records()` (which only catches `FrontMatterError`/`OSError`) loads it
+    unchanged. `effective_edges()` then tests `effective_state` for membership
+    in a *set* (`not in {"proposed", "implemented", "superseded"}`), and an
+    unhashable value there raises `TypeError` before the loop reaches any
+    other record - the `store.effective_edges()` call below is what fails on
+    the old code, not the two assertions after it.
+    """
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    good = make_record(decisions, "D-260908-good", "01M21BV91NZSW1HMJ127KZAA5J")
+    good.save()
+    bad = make_record(decisions, "D-260909-bad", "01M21BV91NZSW1HMJ127KZAA5K")
+    bad.data["effective_state"] = []
+    bad.save()
+
+    store = Store(tmp_path)
+    assert store.effective_edges() == []
+
+    log = error_log_path(tmp_path).read_text(encoding="utf-8")
+    assert "scribe: skipped D-260909-bad.md: effective_state must be a string" in log
+    assert [record.data["alias"] for record in store.records()] == ["D-260908-good"]
+
+
+def test_records_skips_a_record_with_a_non_string_supersedes(tmp_path: Path) -> None:
+    """V17 follow-up: `supersedes: []` also parses as valid YAML and used to load
+    through unchanged. `reconcile_supersession` uses `supersedes` as a dict key
+    (`by_id.get(successor.data.get("supersedes"))`); an unhashable value there
+    raises `TypeError` - the `reconcile_supersession(store.records(), ...)` call
+    below is what fails on the old code, not the assertion after it.
+    """
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    good = make_record(decisions, "D-260908-good", "01M21BV91NZSW1HMJ127KZAA5J")
+    good.save()
+    bad = make_record(decisions, "D-260909-bad", "01M21BV91NZSW1HMJ127KZAA5K")
+    bad.data["supersedes"] = []
+    bad.save()
+
+    store = Store(tmp_path)
+    assert reconcile_supersession(store.records(), "scribe-lint") == []
+
+    log = error_log_path(tmp_path).read_text(encoding="utf-8")
+    assert "scribe: skipped D-260909-bad.md: supersedes must be a string or null" in log
 
 
 FULL_ATTESTATION = {

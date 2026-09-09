@@ -11,6 +11,7 @@ from typing import Any
 
 from scribe.frontmatter import split
 from scribe.hooks.launcher import payload_cwd, repo_root, store_for
+from scribe.schema import unhashable_enum_reason
 from scribe.state import log_hook_error, session_entry, update_state
 from scribe.store import Store
 
@@ -18,13 +19,24 @@ POLICY = "advisory"
 
 
 def load_front_matters(store: Store) -> list[dict[str, Any]]:
-    """Front matter of every record; files that fail to parse are logged and skipped."""
+    """Front matter of every record; files that fail to parse are logged and skipped.
+
+    This reads front matter directly rather than through `Store.records()`, so it
+    also needs the V17 follow-up type check: a `supersedes: []` (or similarly
+    non-string `review_state`/`effective_state`) record is valid YAML and would
+    otherwise load through, then crash `review_queue_counts`'s `in ratified_keys`
+    set check and take every other record's queue count down with it.
+    """
     mappings = []
     for path in sorted(store.path.glob("D-*.md")):
         try:
             mapping, _ = split(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             log_hook_error(store.root, f"scribe: skipped {path.name}: {exc}")
+            continue
+        reason = unhashable_enum_reason(mapping)
+        if reason is not None:
+            log_hook_error(store.root, f"scribe: skipped {path.name}: {reason}")
             continue
         mappings.append(mapping)
     return mappings

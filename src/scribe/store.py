@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .record import Record
-from .schema import Problem
+from .schema import Problem, unhashable_enum_reason
 from .state import log_hook_error
 
 REQUIRED_ATTESTATION_KEYS = ("id", "alias", "verdict", "by", "at", "via", "body_sha256")
@@ -50,14 +50,30 @@ class Store:
         supersede gate, the index, and lint all need the other records to
         still resolve, and `scribe validate` already reports a malformed file
         on its own by loading it directly rather than through the store.
+
+        V17 follow-up: a file that parses as valid YAML but gives `review_state`,
+        `effective_state` or `supersedes` a non-string value (e.g. `[]`) is not a
+        `FrontMatterError` and used to load through untouched, then crash the
+        first caller that tests one of those fields for set membership or uses it
+        as a dict key (`effective_edges`, `effective_authority`,
+        `reconcile_supersession`, lint's `ACTIVE_STATES` check) - taking every
+        other record in that same pass down with it. `unhashable_enum_reason` is
+        the same type check `validate_record` runs for these fields, so this
+        stays consistent with `scribe validate` about what counts as malformed.
         """
         if self._records is None or refresh:
             loaded: list[Record] = []
             for path in sorted(self.path.glob("D-*.md")):
                 try:
-                    loaded.append(Record.load(path))
+                    record = Record.load(path)
                 except (OSError, ValueError) as exc:
                     log_hook_error(self.root, f"scribe: skipped {path.name}: {exc}")
+                    continue
+                reason = unhashable_enum_reason(record.data)
+                if reason is not None:
+                    log_hook_error(self.root, f"scribe: skipped {path.name}: {reason}")
+                    continue
+                loaded.append(record)
             self._records = loaded
         return self._records
 
@@ -119,7 +135,9 @@ class Store:
             or record.data.get("effective_state") not in {"proposed", "implemented"}
         ):
             return False
-        return all(predecessor is not record for _, predecessor in self.effective_edges())
+        return all(
+            predecessor is not record for _, predecessor in self.effective_edges()
+        )
 
 
 def attestation_line_problems(text: str) -> list[Problem]:
