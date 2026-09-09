@@ -786,7 +786,8 @@ def test_pending_ids_that_resolve_to_no_record_are_reported_and_pruned(
 def test_lint_on_this_repository_has_no_verify_failure() -> None:
     _, findings, records = run_lint(PROJECT_ROOT)
 
-    assert records == 3
+    # The live ledger grows with dogfooding; only the seed floor is fixed.
+    assert records >= 3
     assert [
         finding.render()
         for finding in findings

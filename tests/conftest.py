@@ -13,6 +13,15 @@ from scribe.record import Record
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+# The fixture ledger is the three hand-written seed records, pinned by alias
+# so that later dogfood records in docs/decisions (unreviewed or ratified)
+# never change what the suite sees (V23 record, 2026-09-09).
+SEED_RECORD_ALIASES = (
+    "D-260908-one-way-door-defer-not-stop",
+    "D-260908-unreviewed-may-supersede-ratified",
+    "D-260908-verbatim-quote-is-the-evidence",
+)
+
 
 @pytest.fixture
 def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -41,22 +50,33 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     decisions = root / "docs" / "decisions"
     decisions.mkdir(parents=True)
-    for source in (PROJECT_ROOT / "docs" / "decisions").glob("D-*.md"):
+    source_store = PROJECT_ROOT / "docs" / "decisions"
+    seed_ids = set()
+    for alias in SEED_RECORD_ALIASES:
         # These fresh repositories start before implementation. Dogfood relink
         # updates the source ledger with commits that do not exist here; keep
         # its body and ratification, but reset implementation data in this copy.
-        record = Record.load(source)
-        record.path = decisions / source.name
+        record = Record.load(source_store / f"{alias}.md")
+        seed_ids.add(record.data["id"])
+        record.path = decisions / f"{alias}.md"
         record.data["effective_state"] = "proposed"
         record.data["implementation_links"] = []
         record.data["history"] = [
-            entry for entry in record.data["history"]
+            entry
+            for entry in record.data["history"]
             if entry.get("event") not in {"implemented", "link_added", "relinked"}
         ]
         record.save()
-    shutil.copy2(
-        PROJECT_ROOT / "docs" / "decisions" / "RATIFICATIONS.jsonl",
-        decisions / "RATIFICATIONS.jsonl",
+    ledger_lines = (
+        (source_store / "RATIFICATIONS.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    seed_attestations = [
+        line
+        for line in ledger_lines
+        if line.strip() and json.loads(line).get("id") in seed_ids
+    ]
+    (decisions / "RATIFICATIONS.jsonl").write_text(
+        "".join(f"{line}\n" for line in seed_attestations), encoding="utf-8"
     )
     (root / ".claude" / "scribe").mkdir(parents=True)
     return root

@@ -91,7 +91,11 @@ def test_unreviewed_record_detects_existing_attestation(tmp_path: Path) -> None:
 
 def test_committed_record_body_hashes_match_attestations() -> None:
     store = Store(Path(__file__).resolve().parents[1])
-    for record in store:
+    reviewed = [
+        record for record in store if record.data["review_state"] != "unreviewed"
+    ]
+    assert len(reviewed) >= 3
+    for record in reviewed:
         attestation = store.latest_attestation(record.data["id"])
         assert attestation is not None
         assert record.body_sha256() == attestation["body_sha256"]
