@@ -5,6 +5,11 @@ verdict without an attestation) are fatal under `SCRIBE_COMMIT_MSG: enforce`;
 check 3 (rejected record), check 4 (governed path without a matching link,
 F12) and the supersede notice (6) always warn. Not implemented (F13): running
 `verify` entries against staged content, see `tests/test_deferred.py`.
+
+Records and attestations are read from the working tree, not from the staged
+content (V13, deferred with a record): a partially staged `docs/decisions`
+change can produce a wrong warning, or under enforce mode a wrong rejection,
+which is why the CI check on the pushed range stays the real gate.
 """
 
 from __future__ import annotations

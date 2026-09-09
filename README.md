@@ -147,7 +147,11 @@ default:
   `post-rewrite`) never fail a commit, amend or rebase in this release:
   exceptions are logged and the hook exits 0. `commit-msg` prints warnings by
   default (`SCRIBE_COMMIT_MSG: warn`); an `enforce` value in the same config
-  file turns three of its checks fatal. `post-rewrite` runs the same relink
+  file turns three of its checks fatal. Enforce mode is not yet recommended:
+  the hook reads records and the ledger from the working tree, not from the
+  staged content, so a partially staged `docs/decisions` change can produce
+  a wrong verdict (deferred as a record; the CI check reads committed
+  content and is unaffected). `post-rewrite` runs the same relink
   as `scribe relink` after `git commit --amend` and `git rebase`, so
   implementation links stay current across a rewrite without a manual step;
   it shares the V8 ledger lock with the other three writers, so a lock
