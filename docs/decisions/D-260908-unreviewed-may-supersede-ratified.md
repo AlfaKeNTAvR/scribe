@@ -2,15 +2,15 @@
 id: 01M21BV91NZSW1HMJ127KZAA5J
 alias: D-260908-unreviewed-may-supersede-ratified
 title: An unreviewed agent record may supersede a ratified one, guarded by queue priority and a CI merge gate
-date: 2026-09-08
+date: '2026-09-08'
 schema_version: 1
 task_refs: []
 review_state: ratified
-effective_state: proposed
+effective_state: implemented
 decided_by: human
 recommended_by: claude-code
-ratified_by: "@nikita"
-ratified_at: 2026-09-08T20:37:41Z
+ratified_by: '@nikita'
+ratified_at: '2026-09-08T20:37:41Z'
 provenance:
   authored_by: agent-drafted
   agent: claude-code
@@ -18,27 +18,37 @@ provenance:
   session: session_01A6tVoZuuWqu56QxEqtAjRw
   prompt_ids: []
   trigger: user-prompt
-  source_messages: []    # transcript message uuids unknown at writing time; the verbatim quote in Evidence is the proof (A12)
+  source_messages: []
 affects:
-  - { type: path, pattern: "src/scribe/index.py" }
-  - { type: path, pattern: "src/scribe/check.py" }
-  - { type: path, pattern: "src/scribe/templates/scribe-check.yml" }
-implementation_links: []
-tags: [lifecycle, supersede, review-queue, ci]
+- {type: path, pattern: src/scribe/index.py}
+- {type: path, pattern: src/scribe/check.py}
+- {type: path, pattern: src/scribe/templates/scribe-check.yml}
+implementation_links:
+- {commit: 64864e9c3f7a, paths: &id001 [src/scribe/index.py]}
+- {commit: 9bd574f0a664, paths: &id002 [src/scribe/check.py]}
+- {commit: 145bbabaf6c1, paths: &id003 [src/scribe/templates/scribe-check.yml]}
+tags:
+- lifecycle
+- supersede
+- review-queue
+- ci
 reversibility: two-way-door
 blast_radius: component
-regret_when: "An unreviewed superseding record is merged to main without ratification, or more than 3 such records wait in the queue at once."
-review: 2026-12-08
+regret_when: An unreviewed superseding record is merged to main without ratification, or more than 3 such records wait in the queue at once.
+review: '2026-12-08'
 verify:
-  - { id: index-marks-supersedes-ratified, engine: grep, pattern: "supersedes ratified", paths: ["src/scribe/index.py"], expect: match, severity: warning }
-  - { id: check-blocks-on-supersede, engine: grep, pattern: "supersedes", paths: ["src/scribe/check.py"], expect: match, severity: warning }
+- {id: index-marks-supersedes-ratified, engine: grep, pattern: supersedes ratified, paths: [src/scribe/index.py], expect: match, severity: warning}
+- {id: check-blocks-on-supersede, engine: grep, pattern: supersedes, paths: [src/scribe/check.py], expect: match, severity: warning}
 supersedes: null
-relates_to: [D-260908-one-way-door-defer-not-stop]
+relates_to:
+- D-260908-one-way-door-defer-not-stop
 history:
-  - { at: 2026-09-08T20:37:41Z, event: proposed, by: "Nikita Boguslavskii", session: session_01A6tVoZuuWqu56QxEqtAjRw }
-  - { at: 2026-09-08T20:37:41Z, event: ratified, by: "@nikita", field: review_state, old: unreviewed, new: ratified }
-  - { at: 2026-09-08T20:37:41Z, event: ratified, by: "@nikita", field: ratified_by, old: null, new: "@nikita" }
-  - { at: 2026-09-08T20:37:41Z, event: ratified, by: "@nikita", field: ratified_at, old: null, new: 2026-09-08T20:37:41Z }
+- {at: '2026-09-08T20:37:41Z', event: proposed, by: Nikita Boguslavskii, session: session_01A6tVoZuuWqu56QxEqtAjRw}
+- {at: '2026-09-08T20:37:41Z', event: ratified, by: '@nikita', field: review_state, old: unreviewed, new: ratified}
+- {at: '2026-09-08T20:37:41Z', event: ratified, by: '@nikita', field: ratified_by, old: null, new: '@nikita'}
+- {at: '2026-09-08T20:37:41Z', event: ratified, by: '@nikita', field: ratified_at, old: null, new: '2026-09-08T20:37:41Z'}
+- {at: '2026-09-09T01:26:46Z', event: relinked, by: scribe-relink, field: implementation_links, old: [], new: [{commit: 64864e9c3f7a, paths: *id001}, {commit: 9bd574f0a664, paths: *id002}, {commit: 145bbabaf6c1, paths: *id003}]}
+- {at: '2026-09-09T01:26:46Z', event: implemented, by: scribe-relink, commit: 145bbabaf6c1, field: effective_state, old: proposed, new: implemented}
 ---
 
 # An unreviewed agent record may supersede a ratified one, guarded by queue priority and a CI merge gate

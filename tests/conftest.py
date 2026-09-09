@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from scribe.cli import main
 from scribe.config import write_config
+from scribe.record import Record
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,7 +42,18 @@ def tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     decisions = root / "docs" / "decisions"
     decisions.mkdir(parents=True)
     for source in (PROJECT_ROOT / "docs" / "decisions").glob("D-*.md"):
-        shutil.copy2(source, decisions / source.name)
+        # These fresh repositories start before implementation. Dogfood relink
+        # updates the source ledger with commits that do not exist here; keep
+        # its body and ratification, but reset implementation data in this copy.
+        record = Record.load(source)
+        record.path = decisions / source.name
+        record.data["effective_state"] = "proposed"
+        record.data["implementation_links"] = []
+        record.data["history"] = [
+            entry for entry in record.data["history"]
+            if entry.get("event") not in {"implemented", "link_added", "relinked"}
+        ]
+        record.save()
     shutil.copy2(
         PROJECT_ROOT / "docs" / "decisions" / "RATIFICATIONS.jsonl",
         decisions / "RATIFICATIONS.jsonl",

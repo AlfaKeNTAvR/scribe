@@ -2,8 +2,8 @@
 
 Measures the whole `uv run --frozen --project <plugin> scribe hook
 pre-tool-use-edit` subprocess against a store of 100 generated records plus the
-three real ones. Run with `-s` to see the two printed numbers. Fails, never
-skips, when `uv` is not on PATH.
+three real ones. The two measurements bypass pytest capture so `-q` shows
+them too. Fails, never skips, when `uv` is not on PATH.
 """
 
 import json
@@ -108,7 +108,9 @@ def remove_bytecode_caches(root: Path) -> int:
     return removed
 
 
-def test_injection_hook_wall_time(tmp_repo: Path) -> None:
+def test_injection_hook_wall_time(
+    tmp_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.fail("uv is not on PATH; the timing test needs the real launcher")
@@ -123,7 +125,8 @@ def test_injection_hook_wall_time(tmp_repo: Path) -> None:
         assert_injected(result)
         warm_times.append(elapsed)
     warm_median = statistics.median(warm_times)
-    print(f"\nwarm median: {warm_median:.3f} s")
+    with capsys.disabled():
+        print(f"\nwarm median: {warm_median:.3f} s")
     assert warm_median < WARM_MEDIAN_LIMIT_S, warm_times
 
     remove_bytecode_caches(PROJECT_ROOT / "src")
@@ -131,5 +134,6 @@ def test_injection_hook_wall_time(tmp_repo: Path) -> None:
         uv, tmp_repo, payload, {"PYTHONDONTWRITEBYTECODE": "1"}
     )
     assert_injected(result)
-    print(f"bytecode-cold: {cold:.3f} s")
+    with capsys.disabled():
+        print(f"bytecode-cold: {cold:.3f} s")
     assert cold < BYTECODE_COLD_LIMIT_S

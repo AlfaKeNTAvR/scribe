@@ -2,15 +2,15 @@
 id: 01M21BVA0X8D5FZCRZNX848569
 alias: D-260908-one-way-door-defer-not-stop
 title: One-way-door decisions are recorded as proposed and batched for the end of the run, never a hard stop, and the Bash denylist keeps the action denied until ratified
-date: 2026-09-08
+date: '2026-09-08'
 schema_version: 1
 task_refs: []
 review_state: ratified
-effective_state: proposed
+effective_state: implemented
 decided_by: human
 recommended_by: claude-code
-ratified_by: "@nikita"
-ratified_at: 2026-09-08T20:37:42Z
+ratified_by: '@nikita'
+ratified_at: '2026-09-08T20:37:42Z'
 provenance:
   authored_by: agent-drafted
   agent: claude-code
@@ -18,27 +18,36 @@ provenance:
   session: session_01A6tVoZuuWqu56QxEqtAjRw
   prompt_ids: []
   trigger: user-prompt
-  source_messages: []    # transcript message uuids unknown at writing time; the verbatim quote in Evidence is the proof (A12)
+  source_messages: []
 affects:
-  - { type: path, pattern: "src/scribe/policy.py" }
-  - { type: path, pattern: "src/scribe/hooks/pre_tool_use_gate.py" }
-  - { type: path, pattern: "skills/decide/SKILL.md" }
-implementation_links: []
-tags: [one-way-door, autonomous-mode, gate, denylist]
+- {type: path, pattern: src/scribe/policy.py}
+- {type: path, pattern: src/scribe/hooks/pre_tool_use_gate.py}
+- {type: path, pattern: skills/decide/SKILL.md}
+implementation_links:
+- {commit: e87e31b6c3cf, paths: &id001 [skills/decide/SKILL.md]}
+- {commit: ae40787ad91c, paths: &id002 [src/scribe/hooks/pre_tool_use_gate.py, src/scribe/policy.py]}
+tags:
+- one-way-door
+- autonomous-mode
+- gate
+- denylist
 reversibility: two-way-door
 blast_radius: component
-regret_when: "A deferred one-way-door question forces rework of more than one completed task, or a run defers more than 2 one-way-doors."
-review: 2026-12-08
+regret_when: A deferred one-way-door question forces rework of more than one completed task, or a run defers more than 2 one-way-doors.
+review: '2026-12-08'
 verify:
-  - { id: gate-has-enforce-switch, engine: grep, pattern: "SCRIBE_GATES", paths: ["src/scribe/hooks/pre_tool_use_gate.py"], expect: match, severity: warning }
-  - { id: decide-skill-batches-one-way-doors, engine: grep, pattern: "one-way-door", paths: ["skills/decide/SKILL.md"], expect: match, severity: warning }
+- {id: gate-has-enforce-switch, engine: grep, pattern: SCRIBE_GATES, paths: [src/scribe/hooks/pre_tool_use_gate.py], expect: match, severity: warning}
+- {id: decide-skill-batches-one-way-doors, engine: grep, pattern: one-way-door, paths: [skills/decide/SKILL.md], expect: match, severity: warning}
 supersedes: null
-relates_to: [D-260908-unreviewed-may-supersede-ratified]
+relates_to:
+- D-260908-unreviewed-may-supersede-ratified
 history:
-  - { at: 2026-09-08T20:37:42Z, event: proposed, by: "Nikita Boguslavskii", session: session_01A6tVoZuuWqu56QxEqtAjRw }
-  - { at: 2026-09-08T20:37:42Z, event: ratified, by: "@nikita", field: review_state, old: unreviewed, new: ratified }
-  - { at: 2026-09-08T20:37:42Z, event: ratified, by: "@nikita", field: ratified_by, old: null, new: "@nikita" }
-  - { at: 2026-09-08T20:37:42Z, event: ratified, by: "@nikita", field: ratified_at, old: null, new: 2026-09-08T20:37:42Z }
+- {at: '2026-09-08T20:37:42Z', event: proposed, by: Nikita Boguslavskii, session: session_01A6tVoZuuWqu56QxEqtAjRw}
+- {at: '2026-09-08T20:37:42Z', event: ratified, by: '@nikita', field: review_state, old: unreviewed, new: ratified}
+- {at: '2026-09-08T20:37:42Z', event: ratified, by: '@nikita', field: ratified_by, old: null, new: '@nikita'}
+- {at: '2026-09-08T20:37:42Z', event: ratified, by: '@nikita', field: ratified_at, old: null, new: '2026-09-08T20:37:42Z'}
+- {at: '2026-09-09T01:26:46Z', event: relinked, by: scribe-relink, field: implementation_links, old: [], new: [{commit: e87e31b6c3cf, paths: *id001}, {commit: ae40787ad91c, paths: *id002}]}
+- {at: '2026-09-09T01:26:46Z', event: implemented, by: scribe-relink, commit: ae40787ad91c, field: effective_state, old: proposed, new: implemented}
 ---
 
 # One-way-door decisions are recorded as proposed and batched for the end of the run, never a hard stop, and the Bash denylist keeps the action denied until ratified

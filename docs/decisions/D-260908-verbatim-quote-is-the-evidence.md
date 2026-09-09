@@ -2,15 +2,15 @@
 id: 01M21BVB05VVF1XV54Y66AWV6E
 alias: D-260908-verbatim-quote-is-the-evidence
 title: The Evidence section quotes the decisive user turn verbatim; transcript pointers are kept but never relied on
-date: 2026-09-08
+date: '2026-09-08'
 schema_version: 1
 task_refs: []
 review_state: ratified
-effective_state: proposed
+effective_state: implemented
 decided_by: human
 recommended_by: claude-code
-ratified_by: "@nikita"
-ratified_at: 2026-09-08T20:37:43Z
+ratified_by: '@nikita'
+ratified_at: '2026-09-08T20:37:43Z'
 provenance:
   authored_by: agent-drafted
   agent: claude-code
@@ -18,27 +18,35 @@ provenance:
   session: session_01A6tVoZuuWqu56QxEqtAjRw
   prompt_ids: []
   trigger: user-prompt
-  source_messages: []    # transcript message uuids unknown at writing time; this record is itself the first application of the rule it states
+  source_messages: []
 affects:
-  - { type: path, pattern: "src/scribe/schema.py" }
-  - { type: path, pattern: "src/scribe/templates/record_template.md" }
-  - { type: path, pattern: "skills/decide/SKILL.md" }
-implementation_links: []
-tags: [schema, evidence, provenance, multi-machine]
+- {type: path, pattern: src/scribe/schema.py}
+- {type: path, pattern: src/scribe/templates/record_template.md}
+- {type: path, pattern: skills/decide/SKILL.md}
+implementation_links:
+- {commit: e7c2684a3173, paths: &id001 [src/scribe/schema.py]}
+- {commit: e87e31b6c3cf, paths: &id002 [skills/decide/SKILL.md, src/scribe/templates/record_template.md]}
+tags:
+- schema
+- evidence
+- provenance
+- multi-machine
 reversibility: two-way-door
 blast_radius: component
-regret_when: "A record's Evidence quote is shown to differ from a surviving transcript, or more than 1 in 5 new records has no decisive turn to quote."
-review: 2026-12-08
+regret_when: A record's Evidence quote is shown to differ from a surviving transcript, or more than 1 in 5 new records has no decisive turn to quote.
+review: '2026-12-08'
 verify:
-  - { id: every-record-has-evidence-section, engine: grep, pattern: "^## Evidence$", paths: ["docs/decisions/D-*.md"], expect: match, severity: error }
-  - { id: template-has-evidence-quote-slot, engine: grep, pattern: "## Evidence", paths: ["src/scribe/templates/record_template.md"], expect: match, severity: warning }
+- {id: every-record-has-evidence-section, engine: grep, pattern: ^## Evidence$, paths: [docs/decisions/D-*.md], expect: match, severity: error}
+- {id: template-has-evidence-quote-slot, engine: grep, pattern: '## Evidence', paths: [src/scribe/templates/record_template.md], expect: match, severity: warning}
 supersedes: null
 relates_to: []
 history:
-  - { at: 2026-09-08T20:37:43Z, event: proposed, by: "Nikita Boguslavskii", session: session_01A6tVoZuuWqu56QxEqtAjRw }
-  - { at: 2026-09-08T20:37:43Z, event: ratified, by: "@nikita", field: review_state, old: unreviewed, new: ratified }
-  - { at: 2026-09-08T20:37:43Z, event: ratified, by: "@nikita", field: ratified_by, old: null, new: "@nikita" }
-  - { at: 2026-09-08T20:37:43Z, event: ratified, by: "@nikita", field: ratified_at, old: null, new: 2026-09-08T20:37:43Z }
+- {at: '2026-09-08T20:37:43Z', event: proposed, by: Nikita Boguslavskii, session: session_01A6tVoZuuWqu56QxEqtAjRw}
+- {at: '2026-09-08T20:37:43Z', event: ratified, by: '@nikita', field: review_state, old: unreviewed, new: ratified}
+- {at: '2026-09-08T20:37:43Z', event: ratified, by: '@nikita', field: ratified_by, old: null, new: '@nikita'}
+- {at: '2026-09-08T20:37:43Z', event: ratified, by: '@nikita', field: ratified_at, old: null, new: '2026-09-08T20:37:43Z'}
+- {at: '2026-09-09T01:26:46Z', event: relinked, by: scribe-relink, field: implementation_links, old: [], new: [{commit: e7c2684a3173, paths: *id001}, {commit: e87e31b6c3cf, paths: *id002}]}
+- {at: '2026-09-09T01:26:46Z', event: implemented, by: scribe-relink, commit: e87e31b6c3cf, field: effective_state, old: proposed, new: implemented}
 ---
 
 # The Evidence section quotes the decisive user turn verbatim; transcript pointers are kept but never relied on

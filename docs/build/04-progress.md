@@ -20,7 +20,7 @@ No implementation tasks had been completed at the start of this session.
 | T13 | done | Opus 5 subagent. Every 4.12 rule code has a fixture test; `scribe lint` on this repo: 3 records, 0 errors, 0 warnings, 0 info; `--expire` sets expired and restores the predecessor; 25 tests. |
 | T14 | done | Fable 5.1 subagent. Nine managed paths, idempotent `unchanged`, foreign hook kept unless --force, core.hooksPath and missing-uv preflight exit 1, shim adds a trailer through real uv, F6 workflow line exits 1 on the supersede branch; 21 tests. Main session re-ran the suite: 331 passed, 2 skipped. |
 | T15 | done | Sonnet 5 subagent. relink rebuilds links from trailers (2 tests); marketplace.json valid; own ci.yml; README rewritten; `scribe init --ci-source .` run on this repo (hooks, settings deny rule, config shadow, scribe-check.yml); `scribe check --base 3a5b1d2` ok. Main session re-ran the suite: 333 passed, 2 skipped. |
-| T16 | todo | Not run. |
+| T16 | done | Codex gpt-6-astra directly (owner instruction, I72). Final `uv run pytest -q`: 333 passed, 3 skipped in 67.64s; warm median 0.372 s, bytecode-cold 0.531 s. lint, index --check and validate all exit 0; validate: 3 records, 0 errors, 0 warnings. DoD 12/13 pass: item 11 finds pre-existing prohibited dash characters in protected docs/build/pipeline/step4c_prompt.txt:13, recorded without editing. Report: 04-implementation-report.md. Main session owns commit and post-commit clean-status check (M3). |
 
 ## Resume notes
 
@@ -44,3 +44,19 @@ No implementation tasks had been completed at the start of this session.
 - No task has been committed or marked done. No implementation report is due yet. The worktree intentionally retains the incomplete T1 scaffold for the resumed session.
 
 ## Commit queue
+
+- T16: deferred two-worktree scenario and README Tests section; I64-I73 audit
+  additions; timing-output and quoted-session acceptance fixes; temporary seed
+  fixture isolation after dogfood relink; this progress update and
+  `04-implementation-report.md`. Include the three command-generated record
+  front-matter changes and INDEX.md from the one requested relink. No record
+  body or RATIFICATIONS.jsonl changed. Preserve the pre-existing M9 addition.
+- All four final acceptance commands passed with
+  `UV_CACHE_DIR=/tmp/scribe-uv-cache UV_OFFLINE=1`. The default uv cache was
+  read-only; no install was needed. Relink initially exposed 11 fixture failures,
+  fixed by resetting only temporary copies' implementation state (I70); the
+  final suite retains all 333 passing tests and exactly three intentional skips.
+- Remaining repository-wide DoD issue: main session must repair the literal
+  U+2014 and U+2013 characters in protected
+  `docs/build/pipeline/step4c_prompt.txt:13` and rerun the required rg scan.
+  That file is byte-identical to HEAD and was not edited in T16.

@@ -66,7 +66,7 @@ Rules for the spec:
 ## 2. Write the record
 
 ```
-uv run --frozen --project ${CLAUDE_PLUGIN_ROOT} scribe new --spec /tmp/scribe-spec.json --register --session ${CLAUDE_SESSION_ID}
+uv run --frozen --project ${CLAUDE_PLUGIN_ROOT} scribe new --spec /tmp/scribe-spec.json --register --session "${CLAUDE_SESSION_ID}"
 ```
 
 A validator error means nothing was written: fix the spec and run it again.

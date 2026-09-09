@@ -165,8 +165,29 @@ release:
 
 ## Tests
 
-`uv run pytest -q` from this repository. Two tests are permanently
-skip-marked pending a documented activation condition: `commit-msg` and
-`scribe check` running `verify` entries against staged or committed content
-(`tests/test_deferred.py`), enabled after 14 days of dogfooding `scribe lint`
-with zero `verify_error`.
+Run the suite from this repository:
+
+```sh
+uv run pytest -q
+```
+
+The suite has exactly three skips, all in `tests/test_deferred.py`:
+
+| Test | Deferred behaviour | When to enable |
+|---|---|---|
+| `test_two_worktree_supersede` | Two real worktrees ratify X, propose Y superseding X, retrieve their own active decision, and merge after Y is ratified. The complete scenario is executable but skipped. | Before turning any gate to `enforce`. |
+| `test_commit_msg_runs_verify_on_staged_content` | Run referenced records' `verify` entries against staged content in `commit-msg`. | After 14 days of dogfooding `scribe lint` with zero `verify_error`; implement the staged-content runner and replace the assertion stub, then remove the skip. |
+| `test_check_runs_verify_on_committed_content` | Run changed records' `verify` entries against committed content in `scribe check`. | After the same 14-day, zero-`verify_error` period; implement the committed-content runner and replace the assertion stub, then remove the skip. |
+
+`tests/test_timing.py` measures the complete injection subprocess through
+`uv run --frozen --project <checkout> scribe hook pre-tool-use-edit`, with
+100 generated records plus the three seed records. It prints `warm median`
+for three runs (must be below 1.0 s) and `bytecode-cold` after removing
+`src/**/__pycache__` and setting `PYTHONDONTWRITEBYTECODE=1` (must be below
+2.0 s). Missing `uv` fails the test. Run it alone with
+`uv run pytest -q -s tests/test_timing.py`.
+
+The edit hook also has a 700 ms internal processing deadline and a 1 s
+Claude Code timeout. A fresh-venv cold start is not measured; SessionStart's
+120 s timeout absorbs initial startup. Tests use temporary repositories;
+git hook tests make commits there, never in this checkout.
