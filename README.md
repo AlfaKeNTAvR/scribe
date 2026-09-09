@@ -20,6 +20,16 @@ claude --plugin-dir ~/scribe
 then, inside a running Claude Code session, run `/reload-plugins` to pick up
 changes without restarting.
 
+Dogfooding caveat (verified 2026-09-09 on Claude Code 2.1.266 and 2.1.267,
+undocumented): Claude Code treats every file under a loaded plugin's root as
+a sensitive path, so a session that loads scribe with `--plugin-dir ~/scribe`
+and then edits files inside `~/scribe` gets a permission prompt on each Edit
+even in `acceptEdits` mode, and a headless `claude -p` run denies the edit
+outright ("which is a sensitive file"). Editing any other repository with the
+plugin loaded is unaffected. To work on scribe's own code with scribe active,
+load the plugin from a copy of the checkout (`cp -a ~/scribe /tmp/scribe-plugin`
+then `--plugin-dir /tmp/scribe-plugin`).
+
 Once scribe is published to a marketplace, install it the normal way (`/plugin
 marketplace add <source>` then `/plugin install scribe`) and re-run the
 install after any version bump: third-party plugins do not auto-update.

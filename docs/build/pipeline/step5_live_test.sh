@@ -2,6 +2,10 @@
 # Step 5 live test: load the plugin in a headless Claude run and edit a governed
 # file, so the SessionStart, UserPromptSubmit and PreToolUse hooks fire for real.
 # Restores src/scribe/index.py afterwards. Output goes to the job tmp dir.
+# Pass criterion is the INJECTION SEEN line. The Edit itself is denied by
+# Claude Code ("a sensitive file") because the plugin root is this same
+# repository; see README's dogfooding caveat and step5b_live_debug.sh (M18).
+# Load the plugin from a copy of the checkout to see the edit land as well.
 set -u
 OUT=/home/alfakentavr/.claude/jobs/f4c38b72/tmp/build
 cd /home/alfakentavr/scribe || exit 1

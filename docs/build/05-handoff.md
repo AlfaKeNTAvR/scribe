@@ -2,7 +2,14 @@
 
 Written by the main Fable 5.1 session for the next session (after a compaction or a usage-limit reset). Everything below is on disk and committed unless marked otherwise.
 
-## Day 2 evening addendum (2026-09-09 about 17:45, read this first; written before a usage-limit reset at 18:10)
+## Day 2 close (2026-09-09 about 19:15, read this first)
+
+- Every item from both final reviews is landed: batch F (F1 to F5) and batch G (G1 to G3), one commit per fix, reports under `docs/build/12-review-fix-*.md`, decisions I128 to I160 and M15 to M17 in the log. About 64 commits on the branch, tree clean, nothing pushed. Suite: 478 passed, 3 skipped. lint (3 info lines, the unreviewed-but-implemented dogfood records), `index --check`, `validate`, `check --base 3a5b1d2` and `claude plugin validate .` green. Shims refreshed in this repo and the three playgrounds (shebang is now `env -S python3 -I -S`).
+- The four usage-limit-killed agents were resumed from their transcripts after the 18:10 reset and finished; three-way merges were needed in gitutil.py (F5 strict helpers versus G2 binary output), check.py (F5 precomputed path sets versus G3 range deletions) and two import lines. The G3 range-deletion helper was made strict and binary to match.
+- Live test (step 5) after the fixes: injection seen; the Edit itself is denied by Claude Code because files under a loaded plugin's own root count as sensitive (M18, README Install caveat). Verified the plugin edits other repositories fine (playground 03, injection seen, edit landed). Scratch copies `~/scribe-wt/plugin-copy*` and `~/scribe-wt/step5*.sh` are from that bisect and can be deleted.
+- Next for the owner: ratify or reject the four unreviewed records (see M17 on why V7 shows as implemented), then say "create it" for the GitHub repo, push and the v0.1.0 tag (Q1). Optional before the tag: one more read-only Codex pass over the batch F and G commits (through `/codex:rescue`, read-only template in memory) since neither reviewer has seen the fixes. Worktrees and branches to delete: `~/scribe-wt/{v3,v8,v19,v21,q2,q3,q4,f1,f2,f3,f4,f5,g1,g2,g3}`.
+
+## Day 2 evening addendum (2026-09-09 about 17:45; written before a usage-limit reset at 18:10)
 
 - State: branch `nikita/feat/scribe-bootstrap`, about 57 commits, nothing pushed, no GitHub repo (Q1 waits for the owner's "create it"). Seven records in `docs/decisions`: three ratified seeds plus four unreviewed dogfood records written today (V7, V13, V23 deferrals, the rebase post-commit proposal; see `pipeline/specs/` and M11 to M13). INDEX review queue lists them; the owner has not ratified any yet.
 - Two independent final reviews, both "fix first": `11-fable-final-review.md` (Fable 5.1 subagent) and `11-codex-final-validation.md` (Codex gpt-6-astra, after the 17:27 quota reset). The owner approved fixing everything before the v0.1.0 tag (M15).
