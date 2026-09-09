@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 from scribe.history_check import check_attestations_append_only
@@ -427,21 +428,24 @@ def test_an_unknown_base_ref_exits_one(run_cli: RunCli, ledger: Path) -> None:
 
 
 def _fake_git_that_fails_one_subcommand(
-    module: object, subcommand: str, stderr: str
-) -> Callable[..., subprocess.CompletedProcess[str]]:
-    """A `gitutil._git` replacement that fails only `git <subcommand> ...`.
+    module: object, subcommand: str, stderr: str, *, binary: bool = False
+) -> Callable[..., subprocess.CompletedProcess[Any]]:
+    """A `gitutil._git` (or `_git_bytes`) replacement failing `git <subcommand>`.
 
-    Every other subcommand is delegated to the real `_git`, so the rest of
+    Every other subcommand is delegated to the real helper, so the rest of
     `scribe check` runs against the real repository, exactly as it would when
     only one git call in the range computation hits a bad ref or a missing
-    object.
+    object. The `-z` pathname commands run through `_git_bytes` (V14), so a
+    fake for those is installed with `binary=True` and fails with bytes output.
     """
-    original = module._git
+    original = module._git_bytes if binary else module._git
+    empty: Any = b"" if binary else ""
+    failure: Any = stderr.encode("utf-8") if binary else stderr
 
-    def fake(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def fake(cwd: Path, *args: str) -> subprocess.CompletedProcess[Any]:
         if args[:1] == (subcommand,):
             return subprocess.CompletedProcess(
-                args=["git", *args], returncode=128, stdout="", stderr=stderr
+                args=["git", *args], returncode=128, stdout=empty, stderr=failure
             )
         return original(cwd, *args)
 
@@ -468,9 +472,9 @@ def test_a_git_failure_computing_the_range_fails_the_check(
 
     monkeypatch.setattr(
         gitutil_module,
-        "_git",
+        "_git_bytes",
         _fake_git_that_fails_one_subcommand(
-            gitutil_module, "diff", "fatal: bad object deadbeef\n"
+            gitutil_module, "diff", "fatal: bad object deadbeef\n", binary=True
         ),
     )
 

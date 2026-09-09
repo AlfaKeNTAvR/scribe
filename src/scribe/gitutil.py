@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -12,8 +13,16 @@ class GitError(RuntimeError):
     `str(exc)` it.
     """
 
-    def __init__(self, what: str, result: subprocess.CompletedProcess[str]) -> None:
-        lines = (result.stderr or "").strip().splitlines()
+    def __init__(
+        self,
+        what: str,
+        result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
+    ) -> None:
+        stderr = result.stderr or ""
+        if isinstance(stderr, bytes):
+            # The `-z` pathname helpers run in binary mode (V14).
+            stderr = stderr.decode("utf-8", errors="replace")
+        lines = stderr.strip().splitlines()
         detail = lines[0] if lines else f"git exited {result.returncode}"
         self.what = what
         self.detail = detail
@@ -29,17 +38,39 @@ def _git(cwd: str | Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _paths_from_z(result: subprocess.CompletedProcess[str]) -> list[str]:
+def _git_bytes(cwd: str | Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    """Like `_git`, but with `text=False` for the `-z` pathname commands.
+
+    `text=True` runs stdout through universal-newline translation and decodes it
+    as UTF-8 with strict errors; a filename containing a raw carriage return or a
+    non-UTF-8 byte sequence is legal on Linux and either gets corrupted by the
+    newline translation or raises `UnicodeDecodeError`, which a hook cannot
+    afford (the fail-open supervisor swallows the whole hook). `_paths_from_z`
+    below decodes each NUL-separated field itself, with `os.fsdecode`.
+    """
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        text=False,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _paths_from_z(result: subprocess.CompletedProcess[bytes]) -> list[str]:
     """Decode `-z` (NUL-terminated) pathname output (V14).
 
     `-z` disables git's default C-style quoting of non-ASCII, tab, quote and
     backslash bytes in a pathname, so every field here is the real filename
     and is returned as is: a literal backslash in a name is not a Windows
-    separator and must not be rewritten to `/`.
+    separator and must not be rewritten to `/`. The command runs through
+    `_git_bytes`, so `result.stdout` is raw bytes; each NUL-separated field is
+    decoded with `os.fsdecode` (surrogateescape), which round-trips any byte
+    sequence, valid UTF-8 or not, to a `str` that still compares equal to
+    `os.fsdecode`d filesystem paths for the same bytes.
     """
     if result.returncode != 0:
         return []
-    return [field for field in result.stdout.split("\0") if field]
+    return [os.fsdecode(field) for field in result.stdout.split(b"\0") if field]
 
 
 def toplevel(cwd: str | Path = ".") -> Path | None:
@@ -50,7 +81,9 @@ def toplevel(cwd: str | Path = ".") -> Path | None:
 
 
 def staged_paths(cwd: str | Path = ".") -> list[str]:
-    result = _git(cwd, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
+    result = _git_bytes(
+        cwd, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"
+    )
     return _paths_from_z(result)
 
 
@@ -196,7 +229,7 @@ def staged_paths_against(base: str, cwd: str | Path = ".") -> list[str]:
     amended commit's parent so the pending filter sees the whole amended
     content, not only what was staged since the original commit (F14).
     """
-    result = _git(
+    result = _git_bytes(
         cwd, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", base
     )
     return _paths_from_z(result)
@@ -235,9 +268,9 @@ def head_sha(cwd: str | Path = ".") -> str | None:
 def commit_changed_paths(rev: str = "HEAD", cwd: str | Path = ".") -> list[str]:
     """Paths a commit touched; a root commit falls back to `git show --name-only`."""
     if rev_parse_commit(f"{rev}^", cwd) is None:
-        result = _git(cwd, "show", "--name-only", "-z", "--format=", rev)
+        result = _git_bytes(cwd, "show", "--name-only", "-z", "--format=", rev)
     else:
-        result = _git(
+        result = _git_bytes(
             cwd, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", rev
         )
     return _paths_from_z(result)
@@ -271,7 +304,7 @@ def diff_names(
     `merge_base`'s docstring); the git hooks keep calling this tolerant, so
     their fail-open behaviour is unchanged.
     """
-    result = _git(cwd, "diff", "--name-only", "-z", f"{base}...{head}")
+    result = _git_bytes(cwd, "diff", "--name-only", "-z", f"{base}...{head}")
     if strict and result.returncode != 0:
         raise GitError(f"the changed paths between {base} and {head}", result)
     return _paths_from_z(result)
@@ -315,7 +348,7 @@ def tree_record_paths(
     this tolerant, so an unrelated caller never sees a `[]` that meant
     "git failed" masquerading as "no records here".
     """
-    result = _git(cwd, "ls-tree", "-r", "--name-only", "-z", rev, "--", subdir)
+    result = _git_bytes(cwd, "ls-tree", "-r", "--name-only", "-z", rev, "--", subdir)
     if strict and result.returncode != 0:
         raise GitError(f"the decision record paths at {rev}", result)
     paths = _paths_from_z(result)

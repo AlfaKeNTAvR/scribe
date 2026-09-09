@@ -6,10 +6,19 @@ treated that quoted text as plain lines and replaced every backslash with a
 forward slash, corrupting exactly the filenames this file exercises. The fix
 requests `-z` (NUL-terminated, unquoted) output instead, so these tests run
 against a real git repository rather than mocking `_git`.
+
+`text=True` on the underlying `subprocess.run` is a second, separate bug on
+top of the quoting one: it runs stdout through universal-newline translation
+(rewriting a raw `\r` inside a field into `\n`) and decodes it as UTF-8 with
+strict errors (raising `UnicodeDecodeError` on a non-UTF-8 byte sequence,
+which both bytes are legal in a Linux filename). `BINARY_UNSAFE_NAMES` below
+exercises those two cases; `text=False` plus per-field `os.fsdecode` fixes
+both.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -20,6 +29,10 @@ CAFE = "src/café.py"
 TAB = "src/tab\tfile.py"
 QUOTE = 'src/quo"te.py'
 SPECIAL_NAMES = (CAFE, TAB, QUOTE)
+
+CARRIAGE_RETURN = "src/carriage\rreturn.py"
+NON_UTF8 = os.fsdecode(b"src/non-utf8-\xff\xfe.py")
+BINARY_UNSAFE_NAMES = (CARRIAGE_RETURN, NON_UTF8)
 
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -52,6 +65,11 @@ def _write_all(root: Path, content: str) -> None:
         (root / name).write_text(content, encoding="utf-8")
 
 
+def _write_binary_unsafe(root: Path, content: str) -> None:
+    for name in BINARY_UNSAFE_NAMES:
+        (root / name).write_text(content, encoding="utf-8")
+
+
 def test_staged_paths_preserves_special_filenames(repo: Path) -> None:
     _write_all(repo, "one\n")
     git(repo, "add", "-A")
@@ -69,6 +87,54 @@ def test_diff_names_preserves_special_filenames(repo: Path) -> None:
     git(repo, "commit", "-q", "-m", "change special names")
 
     assert set(diff_names(base, "HEAD", repo)) == set(SPECIAL_NAMES)
+
+
+def test_staged_paths_preserves_carriage_return_and_non_utf8_filenames(
+    repo: Path,
+) -> None:
+    """A raw CR inside a name and a non-UTF-8 byte sequence must both survive.
+
+    On the old `text=True` code, `staged_paths(repo)` never returns: universal
+    newline translation rewrites the embedded `\r` in `CARRIAGE_RETURN` into
+    `\n` and strict UTF-8 decoding raises `UnicodeDecodeError` on `NON_UTF8`,
+    so the `set(staged_paths(repo)) == set(BINARY_UNSAFE_NAMES)` assertion is
+    never reached; the call itself raises first.
+    """
+    if os.name == "nt":
+        pytest.skip("raw CR and arbitrary bytes are not legal in Windows filenames")
+    try:
+        _write_binary_unsafe(repo, "one\n")
+    except OSError as exc:
+        pytest.skip(f"filesystem refuses a raw CR or non-UTF-8 filename: {exc}")
+    git(repo, "add", "-A")
+
+    assert set(staged_paths(repo)) == set(BINARY_UNSAFE_NAMES)
+
+
+def test_diff_names_preserves_carriage_return_and_non_utf8_filenames(
+    repo: Path,
+) -> None:
+    """Same as above, through the `base...head` diff path `diff_names` uses.
+
+    On the old code, `diff_names(base, "HEAD", repo)` raises `UnicodeDecodeError`
+    decoding `NON_UTF8`'s raw bytes before the `set(...) == set(BINARY_UNSAFE_NAMES)`
+    assertion is reached (and, independently, `CARRIAGE_RETURN` comes back with
+    its `\r` rewritten to `\n` by universal-newline translation).
+    """
+    if os.name == "nt":
+        pytest.skip("raw CR and arbitrary bytes are not legal in Windows filenames")
+    try:
+        _write_binary_unsafe(repo, "one\n")
+    except OSError as exc:
+        pytest.skip(f"filesystem refuses a raw CR or non-UTF-8 filename: {exc}")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "add binary-unsafe names")
+    base = git(repo, "rev-parse", "HEAD").stdout.strip()
+    _write_binary_unsafe(repo, "two\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "change binary-unsafe names")
+
+    assert set(diff_names(base, "HEAD", repo)) == set(BINARY_UNSAFE_NAMES)
 
 
 def test_commit_changed_paths_preserves_special_filenames(repo: Path) -> None:
