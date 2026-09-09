@@ -1,0 +1,12 @@
+You are reviewing, read-only, two commits in /home/alfakentavr/scribe (branch nikita/feat/scribe-bootstrap) that implement groups 1 and 2 of "Batch A" from an earlier validation you (Codex gpt-6-astra) produced. You cannot write files or run uv here; use read-only git (log, show, diff) and `.venv/bin/python -B -m scribe ...` for read-only application checks.
+
+Read first:
+1. /home/alfakentavr/scribe/docs/build/04b-codex-validation.md: your original findings V4, V7, V9, V10, V11, V15, V16, V18, V19, V20, V22.
+2. /home/alfakentavr/scribe/docs/build/06-validation-triage.md: the Batch A rows for those findings (the intended fix for each).
+3. /home/alfakentavr/scribe/docs/build/07-batch-a-report.md: what the implementer says it did and which test fails on the old code.
+4. The diffs: `git show 96a8bd0` (group 1) and `git show c80c5c2` (group 2), plus the I74 to I84 lines in /home/alfakentavr/scribe/AUTONOMOUS_DECISIONS_09_08_2026.md.
+5. Also review `git show 94f5971` (the V1 fix: hooks/supervise.py, src/scribe/protocol.py, the shim template, hooks/hooks.json). Check the marker protocol for bypasses (can uv or a crash ever print the marker line? can a deliberate deny be lost?) and whether `python3 -I` plus a stdlib-only script is a safe registration on Linux and macOS.
+
+For each finding above, state one of: `closed` (the fix matches the intent and the test would fail on the old code), `partial` (what is missing), `regressed` (what broke, with a reproduction), or `disagree` (why the fix is the wrong approach). Be specific: file, function, line. Then list any new defects the two commits introduced, with the same file/function/line precision and a reproduction or reasoning. Do not repeat Batch B or C items; they are known and deferred.
+
+Output: a Markdown report starting with `# Codex review of Batch A groups 1 and 2`, a one-line verdict (`merge`, `fix first`, or `rework`), then a section per finding, then `## New defects`, then `## V1 supervisor`. Plain hyphens only, no em or en dashes, no emojis. Under 1500 words.

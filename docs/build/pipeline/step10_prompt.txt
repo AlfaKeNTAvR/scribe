@@ -1,0 +1,45 @@
+You are implementing "Batch B" of the validation triage for `scribe`, a Claude Code plugin in /home/alfakentavr/scribe (git repo, branch nikita/feat/scribe-bootstrap, workspace-write sandbox; .git is read-only for you, so never run git commands that write; read-only git such as log, status, diff, show, rev-list is fine; the main session commits your work afterwards from the commit queue you write).
+
+The owner has decided every item below; implement the decisions as stated, do not re-open them.
+
+Read first:
+1. /home/alfakentavr/scribe/docs/build/06-validation-triage.md, section "Batch B".
+2. /home/alfakentavr/scribe/docs/build/04b-codex-validation.md: the full text of V3, V8, V12, V19 (pending cap paragraph), V21, and the conformance note about TaskCompleted clearing its flag.
+3. /home/alfakentavr/scribe/docs/build/07-batch-a-report.md: report format and what groups 1 to 3 and V6 already changed (V5 made attestation reading strict; V6 added `record_deleted`; reuse both).
+4. /home/alfakentavr/scribe/docs/build/03-plan-v2.md sections 3.7, 3.8, 4.7, 4.8, 5.4.
+5. Skim src/scribe/ and tests/.
+
+Environment: uv only, no installs. If `uv run` fails because the default cache is read-only, prefix every uv command with `UV_CACHE_DIR=/tmp/scribe-uv-cache UV_OFFLINE=1`. The suite must stay green with exactly the 3 existing skips after every item.
+
+Rules: plain hyphens only, no em or en dashes, no emojis, in any file; never edit the three record bodies under docs/decisions/D-*.md, never edit docs/decisions/RATIFICATIONS.jsonl; do not edit anything under docs/build/ except the new file docs/build/09-batch-b-report.md; append new I-lines (continue after the last I-line in the file) to the "## Step 4 implementer decisions" section of /home/alfakentavr/scribe/AUTONOMOUS_DECISIONS_09_08_2026.md for every non-obvious choice; keep existing tests passing unless a test encoded the defect (then fix it and say so in an I-line). Save an incremental patch after each item exactly the way /tmp/scribe-batch-a-snapshot.py did for Batch A (write your own copy at /tmp/scribe-batch-b-snapshot.py, queue dir /tmp/scribe-batch-b-commits, item numbers 1 to 5) so the main session can commit item by item.
+
+Items, in order, each finished (code, tests, suite green, report section, patch) before the next:
+
+Item 0, follow-ups from /home/alfakentavr/scribe/docs/build/08-codex-review-batch-a.md (read its "New defects" and "V1 supervisor" sections):
+- P2 state lock: `pre_tool_use_gate.plan_verdict` (and any other caller that reads state through an `update_state` mutation callback) must read pending decisions from the returned state, so a lock timeout never turns into a false deny; test: hold `state.json.lock` past the timeout, submit a plan in enforce mode with pending decisions present, expect allow.
+- P2 rm rule: `policy` must keep command boundaries (newline, `;`, `&&`, `||`, `|`) before scanning rm flags and targets; test the negative case `rm build` newline `printf '%s\n' -rf /tmp/example` (must not match) and keep the positive `rm -rf build /tmp/other`.
+- V1 marker provenance: the supervisor generates a random per-invocation token, passes it to the child in the environment variable `SCRIBE_DENY_TOKEN`, and `scribe.protocol.announce_deny` prints `[scribe-deny <token>]`; the supervisor accepts only that exact line, so a traceback containing `[scribe-deny]` can no longer impersonate a denial. When the marker is validated, the supervisor forces the blocking status itself: exit 2 for `hook` invocations, exit 1 for `git-hook` invocations, whatever the child returned. Add `-S` next to `-I` in hooks/hooks.json and in the timing and supervisor tests. The git shim re-executes itself under `sys.executable -I -S` when `sys.flags.isolated` is false (wrapped in try, fail open). Update README's fail-open bullet and the hooks.json test accordingly. Tests: traceback impersonation is mapped to exit 0; marker plus exit 0 from the child still yields exit 2 for a hook and 1 for a git hook; the shim re-exec path.
+
+Item 1, V12 "attested, live, not superseded". One shared predicate, for example `store.effective_authority(record)` returning True only when: the latest attestation for the record is `ratified` with `body_sha256` equal to the current body hash; `effective_state` is `proposed` or `implemented`; and no effective supersession edge points at the record. The Bash and PowerShell gate (`pre_tool_use_gate.action_is_ratified` or its successor) uses it; INDEX.md's active list and commit-msg's active_records reuse it where they currently re-derive the same idea. Fix the test helper `write_ratified_action_record` so it writes a real attestation, and add negative tests: unattested, expired, superseded, body hash mismatch. Also: after an enforce-mode denial, TaskCompleted must NOT clear `decision_worthy` (the retry needs a record first); shadow mode keeps today's behaviour. Test both.
+
+Item 2, V3 "refuse dirty ledger, base tip". `scribe check --base <ref>` exits 1 with a clear message when `git status --porcelain -- docs/decisions` is non-empty, unless `--allow-dirty` is given; the predecessor-was-ratified question is answered against the base ref's tip (the ref as given), not the merge base, while changed paths and commits still come from the merge base range. Tests: dirty ledger refused and allowed; a ratification added on the target branch after the fork is honoured. Document the flag in README's CLI table and in the scribe-check.yml template only if CI needs it (it should not: CI checkouts are clean).
+
+Item 3, V8 "one ledger lock everywhere". New record files are created with exclusive create (`open(path, "x")` or `O_EXCL`) so two `scribe new` runs with the same title cannot overwrite each other (the loser picks the next `-2` suffix or fails cleanly, say which in an I-line). The existing ratify lock (`state.locked` or its successor from V9) is also taken by `scribe new --register`, post-commit, relink and `lint --expire`, and every one of them reloads the records after acquiring the lock. On lock timeout each of them behaves like V9's ratify: one stderr line, no ledger write, non-zero exit for CLI commands, exit 0 for the git hook (fail open, nothing written). Tests: alias race with a pre-created file, lock held past the timeout for each writer.
+
+Item 4, V19 "no cap, prune on expiry". Remove the 20-entry cap on `pending_decisions`; ids stay until a commit consumes them or the session is pruned by the existing expiry. Update the plan reference in the code comment and any test that asserted the cap.
+
+Item 5, V21 "subdirectory start". Live tests showed that NO project settings (`.claude/settings.json` or `settings.local.json`, relative, `**` or absolute rules) load when Claude Code starts in a subdirectory of the repo, so the deny rule only protects sessions started at the repo root. Implement: (a) the SessionStart hook compares the payload `cwd` with the repository root and, when they differ, prints one line of additionalContext such as `scribe: session started below the repository root; the RATIFICATIONS.jsonl deny rule from .claude/settings.json is not active here; start Claude at <root> or add Edit(**/docs/decisions/RATIFICATIONS.jsonl) to your user settings` (advisory, exit 0); (b) `scribe init` prints a similar hint in its next-steps block; (c) README's ratification section states the limitation and the user-level rule. Tests for (a) and (b). Do not write user settings.
+
+After each item append to /home/alfakentavr/scribe/docs/build/09-batch-b-report.md a "## Item N (Vxx)" section: files changed, test names with the assertion that fails on the old code, suite count, and a proposed commit message in this exact shape (type: Capitalised title under 70 chars, blank line, one or two sentences why and what, no file lists):
+
+```
+fix: <title>
+
+<body>
+```
+
+Subagents: the default subagent model (gpt-5.6-luna) is for reading, searching and extracting; if you delegate an implementation item, request model gpt-5.6-terra for that subagent. You run the suite and write the report yourself.
+
+If you run out of time mid-item, leave `uv run pytest -q` green (undo the half-finished item's edits by hand) and say so under "## Remaining".
+
+Finish with one line: `DONE: items <list> complete, <N> passed, 3 skipped, report at docs/build/09-batch-b-report.md`, or `PARTIAL: <what remains>`.
