@@ -20,6 +20,7 @@ from scribe.githooks import repo_store
 from scribe.links import STORE_PREFIX, _path_entries
 from scribe.lookup import TRAILER_KEY
 from scribe.matching import matches_affects
+from scribe.protocol import announce_deny
 from scribe.record import Record
 from scribe.schema import validate_record
 from scribe.store import Store
@@ -186,6 +187,6 @@ def run(args: Sequence[str]) -> int:
     for finding in findings:
         print(f"scribe: {finding.level}: {finding.message}", file=sys.stderr)
     if commit_msg_mode(root) == "enforce" and any(f.fatal for f in findings):
-        print("scribe: commit rejected (SCRIBE_COMMIT_MSG: enforce)", file=sys.stderr)
+        announce_deny("scribe: commit rejected (SCRIBE_COMMIT_MSG: enforce)")
         return 1
     return 0

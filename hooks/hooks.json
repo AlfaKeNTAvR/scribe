@@ -1,13 +1,18 @@
 {
-  "description": "scribe: advisory decision hooks and shadow-mode gates; every handler is `scribe hook <event>` run through uv",
+  "description": "scribe: advisory decision hooks and shadow-mode gates; every handler is `scribe hook <event>` run through uv behind the fail-open supervisor hooks/supervise.py",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "uv",
-            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "session-start"],
+            "command": "python3",
+            "args": [
+              "-I",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
+              "hook",
+              "session-start"
+            ],
             "timeout": 120
           }
         ]
@@ -18,8 +23,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv",
-            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "user-prompt-submit"],
+            "command": "python3",
+            "args": [
+              "-I",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
+              "hook",
+              "user-prompt-submit"
+            ],
             "timeout": 10
           }
         ]
@@ -31,8 +41,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv",
-            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "pre-tool-use-edit"],
+            "command": "python3",
+            "args": [
+              "-I",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
+              "hook",
+              "pre-tool-use-edit"
+            ],
             "timeout": 1
           }
         ]
@@ -42,8 +57,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv",
-            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "gate"],
+            "command": "python3",
+            "args": [
+              "-I",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
+              "hook",
+              "gate"
+            ],
             "timeout": 10
           }
         ]
@@ -53,8 +73,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv",
-            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "gate"],
+            "command": "python3",
+            "args": [
+              "-I",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
+              "hook",
+              "gate"
+            ],
             "timeout": 10
           }
         ]
@@ -65,8 +90,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv",
-            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "reconcile"],
+            "command": "python3",
+            "args": [
+              "-I",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
+              "hook",
+              "reconcile"
+            ],
             "timeout": 10
           }
         ]
@@ -77,8 +107,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv",
-            "args": ["run", "--frozen", "--project", "${CLAUDE_PLUGIN_ROOT}", "scribe", "hook", "reconcile"],
+            "command": "python3",
+            "args": [
+              "-I",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
+              "hook",
+              "reconcile"
+            ],
             "timeout": 10
           }
         ]

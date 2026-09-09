@@ -2,7 +2,9 @@
 
 `run_advisory` never fails a tool call: any exception in the handler is logged
 to `.claude/scribe/hook-errors.log` and the exit code is 0. `run_gate` exits 2
-only for a deliberate deny in enforce mode; a crash exits 0 in both modes.
+only for a deliberate deny in enforce mode, announced with the
+`scribe.protocol` marker so `hooks/supervise.py` lets that exit through; a
+crash exits 0 in both modes.
 
 Hook stdin fields read here are the ones plan 4.1 item 3 lists (`cwd`,
 `hook_event_name`); every read is `payload.get(...)`.
@@ -22,6 +24,7 @@ from typing import Any
 
 from scribe import gitutil
 from scribe.config import gates_mode
+from scribe.protocol import announce_deny
 from scribe.record import utc_now
 from scribe.state import log_hook_error, state_dir
 from scribe.store import Store
@@ -174,8 +177,7 @@ def run_gate(
         except OSError as exc:
             _report_failure(root, event, exc, loud=True)
         if mode == "enforce" and not verdict.allow:
-            print(verdict.reason, file=sys.stderr)
-            sys.stderr.flush()
+            announce_deny(verdict.reason)
             return 2
     except BaseException as exc:
         _report_failure(root, event, exc, loud=True)

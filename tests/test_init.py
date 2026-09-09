@@ -91,7 +91,8 @@ def test_init_installs_three_managed_executable_hooks(
         assert "# scribe-managed" in text
         assert f'HOOK = "{name}"' in text
         assert f'PLUGIN_ROOT = r"{PROJECT_ROOT}"' in text
-        assert "scribe git-hook" not in text.split("COMMAND")[0]
+        assert "import supervise" in text
+        assert 'supervise.run(["git-hook", HOOK]' in text
         assert os.access(hook, os.X_OK)
         assert f"scribe init: wrote .git/hooks/{name}" in stdout
     assert set(HOOK_NAMES) == {"prepare-commit-msg", "commit-msg", "post-commit"}

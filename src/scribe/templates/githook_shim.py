@@ -1,33 +1,22 @@
 #!{{SHEBANG}}
 # scribe-managed v1  -- do not edit; re-run `scribe init --force` to refresh
 import os
-import subprocess
 import sys
 
 PLUGIN_ROOT = r"{{PLUGIN_ROOT}}"  # baked in by scribe init
 HOOK = "{{HOOK}}"
-COMMAND = [
-    "uv",
-    "run",
-    "--frozen",
-    "--project",
-    PLUGIN_ROOT,
-    "scribe",
-    "git-hook",
-    HOOK,
-    *sys.argv[1:],
-]
 
 if os.environ.get("SCRIBE_SKIP_HOOKS") == "1":
     sys.exit(0)
+# The supervisor runs `uv run ... scribe git-hook <name>` fail-open: a uv or
+# startup failure exits 0 with one stderr line, so a broken tool never blocks
+# a commit; only a deliberate refusal (commit-msg in enforce mode) exits 1.
+# UNVERIFIED (U3): Git for Windows is assumed to honour the
+# `#!/usr/bin/env python` shebang and to resolve `uv.exe` through PATH.
 try:
-    if os.name == "nt":
-        # UNVERIFIED (U3): on Windows os.execvp does not replace the process, so
-        # the hook waits for uv and forwards its exit code; Git for Windows is
-        # assumed to honour the `#!/usr/bin/env python` shebang and to resolve
-        # `uv.exe` through PATH. Not exercised on a Windows machine.
-        sys.exit(subprocess.call(COMMAND))
-    os.execvp("uv", COMMAND)
-except OSError as exc:
-    sys.stderr.write(f"scribe: {HOOK} skipped ({exc})\n")
+    sys.path.insert(0, os.path.join(PLUGIN_ROOT, "hooks"))
+    import supervise
+except Exception as exc:  # noqa: BLE001 - fail open on any import problem
+    sys.stderr.write("scribe: %s skipped (supervisor unavailable: %s)\n" % (HOOK, exc))
     sys.exit(0)
+sys.exit(supervise.run(["git-hook", HOOK] + sys.argv[1:]))

@@ -1,9 +1,10 @@
 """Wall-clock budget of the PreToolUse injection hook (plan 7 item 5, F19).
 
-Measures the whole `uv run --frozen --project <plugin> scribe hook
-pre-tool-use-edit` subprocess against a store of 100 generated records plus the
+Measures the whole registered command, `python3 -I <plugin>/hooks/supervise.py
+hook pre-tool-use-edit` (which runs `uv run --frozen --project <plugin> scribe
+hook pre-tool-use-edit`), against a store of 100 generated records plus the
 three real ones. The two measurements bypass pytest capture so `-q` shows
-them too. Fails, never skips, when `uv` is not on PATH.
+them too. Fails, never skips, when `uv` or `python3` is not on PATH.
 """
 
 import json
@@ -69,17 +70,14 @@ def hook_payload(root: Path) -> str:
 
 
 def timed_hook_run(
-    uv: str, root: Path, payload: str, extra_env: dict[str, str] | None = None
+    python3: str, root: Path, payload: str, extra_env: dict[str, str] | None = None
 ) -> tuple[float, subprocess.CompletedProcess[str]]:
     started = time.perf_counter()
     result = subprocess.run(
         [
-            uv,
-            "run",
-            "--frozen",
-            "--project",
-            str(PROJECT_ROOT),
-            "scribe",
+            python3,
+            "-I",
+            str(PROJECT_ROOT / "hooks" / "supervise.py"),
             "hook",
             "pre-tool-use-edit",
         ],
@@ -111,9 +109,11 @@ def remove_bytecode_caches(root: Path) -> int:
 def test_injection_hook_wall_time(
     tmp_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    uv = shutil.which("uv")
-    if uv is None:
+    if shutil.which("uv") is None:
         pytest.fail("uv is not on PATH; the timing test needs the real launcher")
+    uv = shutil.which("python3")
+    if uv is None:
+        pytest.fail("python3 is not on PATH; the registered command needs it")
     store = tmp_repo / "docs" / "decisions"
     generate_records(store, GENERATED_RECORDS)
     assert len(list(store.glob("D-*.md"))) == GENERATED_RECORDS + 3

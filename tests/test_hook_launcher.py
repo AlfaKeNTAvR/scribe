@@ -15,11 +15,8 @@ from scribe.state import ERROR_LOG_MAX_BYTES, error_log_path, log_hook_error
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = PROJECT_ROOT / "tests" / "fixtures" / "hooks"
 HOOK_ARGS_PREFIX = [
-    "run",
-    "--frozen",
-    "--project",
-    "${CLAUDE_PLUGIN_ROOT}",
-    "scribe",
+    "-I",
+    "${CLAUDE_PLUGIN_ROOT}/hooks/supervise.py",
     "hook",
 ]
 
@@ -62,7 +59,7 @@ def test_hooks_json_every_handler_is_exec_form() -> None:
         for entry in entries:
             for handler in entry["hooks"]:
                 assert handler["type"] == "command"
-                assert handler["command"] == "uv"
+                assert handler["command"] == "python3"
                 assert handler["args"][: len(HOOK_ARGS_PREFIX)] == HOOK_ARGS_PREFIX
                 assert isinstance(handler["timeout"], int)
                 hook_event = handler["args"][len(HOOK_ARGS_PREFIX)]

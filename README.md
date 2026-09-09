@@ -126,6 +126,16 @@ default:
   fail a commit in this release: exceptions are logged and the hook exits 0.
   `commit-msg` prints warnings by default (`SCRIBE_COMMIT_MSG: warn`); an
   `enforce` value in the same config file turns three of its checks fatal.
+- `uv` itself is covered too. Every registered hook command and every git
+  shim runs `uv run ... scribe` through `hooks/supervise.py`, a stdlib-only
+  Python script (system `python3`, 3.8 or newer). If uv cannot start (missing
+  binary, locked or read-only cache, stale `uv.lock`) or the application
+  crashes, the supervisor prints one `scribe: <hook> skipped (...)` line to
+  stderr and exits 0, so Claude Code never sees the exit 2 that would deny a
+  tool call and git never sees a failed hook. Only a deliberate refusal (a
+  gate in `enforce` mode, `commit-msg` under `SCRIBE_COMMIT_MSG: enforce`)
+  is passed through: the application marks it with a `[scribe-deny]` stderr
+  line that the supervisor strips before forwarding the exit code.
 
 ## Config file
 
@@ -147,12 +157,15 @@ Windows is best effort by construction (Python via `uv`, forward-slash paths,
 exec-form hooks, no bash), not tested against a real Windows machine in this
 release:
 
-- **Shim interpreter**: the git hook shims `scribe init` writes use
+- **Shim and hook interpreter**: the git hook shims `scribe init` writes use
   `#!/usr/bin/env python3` on POSIX and `#!/usr/bin/env python` on Windows
-  (`os.name == "nt"` at init time), and replace `os.execvp` with
-  `subprocess.call` plus `sys.exit(code)` because `execvp` does not replace
-  the process on Windows. `scribe init` refuses to install anything if `uv`
-  or the shim interpreter is not on PATH.
+  (`os.name == "nt"` at init time); both import `hooks/supervise.py` from the
+  plugin root and wait for uv through `subprocess.run`, so nothing depends on
+  `execvp`. `scribe init` refuses to install anything if `uv` or the shim
+  interpreter is not on PATH. The Claude Code hooks in `hooks/hooks.json`
+  are registered as `python3 -I <plugin>/hooks/supervise.py ...`; a Windows
+  machine whose interpreter is only reachable as `python` needs that command
+  name changed, which has not been tried.
 - **Lock adapter untested**: the scratch-state file lock
   (`src/scribe/state.py`) uses `fcntl.flock` on POSIX and `msvcrt.locking` on
   Windows. The Windows branch is exercised only against a faked `msvcrt`
@@ -180,11 +193,13 @@ The suite has exactly three skips, all in `tests/test_deferred.py`:
 | `test_check_runs_verify_on_committed_content` | Run changed records' `verify` entries against committed content in `scribe check`. | After the same 14-day, zero-`verify_error` period; implement the committed-content runner and replace the assertion stub, then remove the skip. |
 
 `tests/test_timing.py` measures the complete injection subprocess through
-`uv run --frozen --project <checkout> scribe hook pre-tool-use-edit`, with
+the registered command, `python3 -I <checkout>/hooks/supervise.py hook
+pre-tool-use-edit` (which runs `uv run --frozen --project <checkout> scribe
+hook pre-tool-use-edit`), with
 100 generated records plus the three seed records. It prints `warm median`
 for three runs (must be below 1.0 s) and `bytecode-cold` after removing
 `src/**/__pycache__` and setting `PYTHONDONTWRITEBYTECODE=1` (must be below
-2.0 s). Missing `uv` fails the test. Run it alone with
+2.0 s). Missing `uv` or `python3` fails the test. Run it alone with
 `uv run pytest -q -s tests/test_timing.py`.
 
 The edit hook also has a 700 ms internal processing deadline and a 1 s
