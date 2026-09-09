@@ -1,11 +1,11 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
-
-from scribe.record import Record
 from scribe.gitutil import git_path_hooks, staged_paths, toplevel
-from scribe.store import Store, reconcile_supersession
+from scribe.record import Record
+from scribe.state import error_log_path
+from scribe.store import Store, attestation_line_problems, reconcile_supersession
 
 
 def make_record(
@@ -25,7 +25,9 @@ def make_record(
             "review_state": review_state,
             "effective_state": effective_state,
             "supersedes": supersedes,
-            "history": [{"at": "2026-09-08T00:00:00Z", "event": "proposed", "by": "test"}],
+            "history": [
+                {"at": "2026-09-08T00:00:00Z", "event": "proposed", "by": "test"}
+            ],
         },
         "",
     )
@@ -91,7 +93,9 @@ def test_reconcile_marks_predecessor_and_appends_history(tmp_path: Path) -> None
         "01M21BV91NZSW1HMJ127KZAA5K",
         supersedes=predecessor.data["alias"],
     )
-    assert reconcile_supersession([predecessor, successor], "scribe-new") == [predecessor]
+    assert reconcile_supersession([predecessor, successor], "scribe-new") == [
+        predecessor
+    ]
     assert predecessor.data["effective_state"] == "superseded"
     assert predecessor.data["history"][-1] | {"at": "ignored"} == {
         "at": "ignored",
@@ -118,7 +122,9 @@ def test_reconcile_restores_latest_prior_state(tmp_path: Path) -> None:
     )
     reconcile_supersession([predecessor, successor], "scribe-new")
     successor.data["review_state"] = "rejected"
-    assert reconcile_supersession([predecessor, successor], "scribe-reject") == [predecessor]
+    assert reconcile_supersession([predecessor, successor], "scribe-reject") == [
+        predecessor
+    ]
     assert predecessor.data["effective_state"] == "implemented"
     assert predecessor.data["history"][-1]["event"] == "restored"
     assert predecessor.data["history"][-1]["old"] == "superseded"
@@ -158,11 +164,14 @@ def test_reconcile_chain_keeps_superseded_successor_effective(tmp_path: Path) ->
 def test_git_utilities_normalize_git_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """V14: `-z` output is decoded as is; a literal backslash is not a separator."""
     nested = tmp_path / "repo" / "nested"
     nested.mkdir(parents=True)
     responses = {
         ("rev-parse", "--show-toplevel"): str(tmp_path / "repo") + "\n",
-        ("diff", "--cached", "--name-only", "--diff-filter=ACMR"): "src/a.py\ndir\\b.py\n",
+        ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"): (
+            "src/a.py\0dir\\b.py\0"
+        ),
         ("rev-parse", "--git-path", "hooks"): "../.git/hooks\n",
     }
 
@@ -171,5 +180,66 @@ def test_git_utilities_normalize_git_results(
 
     monkeypatch.setattr("scribe.gitutil._git", fake_git)
     assert toplevel(nested) == tmp_path / "repo"
-    assert staged_paths(nested) == ["src/a.py", "dir/b.py"]
+    assert staged_paths(nested) == ["src/a.py", "dir\\b.py"]
     assert git_path_hooks(nested) == tmp_path / "repo" / ".git" / "hooks"
+
+
+def test_records_skips_a_malformed_file_and_logs_instead_of_raising(
+    tmp_path: Path,
+) -> None:
+    """V17: one bad record must not abort the whole collection."""
+    decisions = tmp_path / "docs" / "decisions"
+    decisions.mkdir(parents=True)
+    good = make_record(decisions, "D-260908-good", "01M21BV91NZSW1HMJ127KZAA5J")
+    good.save()
+    (decisions / "D-260909-broken.md").write_text(
+        "no front matter here\n", encoding="utf-8"
+    )
+
+    records = Store(tmp_path).records()
+
+    assert [record.data["alias"] for record in records] == ["D-260908-good"]
+    log = error_log_path(tmp_path).read_text(encoding="utf-8")
+    assert "scribe: skipped D-260909-broken.md" in log
+
+
+FULL_ATTESTATION = {
+    "id": "01M21BV91NZSW1HMJ127KZAA5J",
+    "alias": "D-260908-old",
+    "verdict": "ratified",
+    "by": "@nikita",
+    "at": "2026-09-08T20:37:41Z",
+    "body_sha256": "a" * 64,
+    "via": "cli",
+}
+
+
+def _line(**overrides: object) -> str:
+    import json
+
+    return json.dumps({**FULL_ATTESTATION, **overrides})
+
+
+def test_attestation_line_problems_accepts_a_well_formed_ledger() -> None:
+    text = _line() + "\n" + _line(id="01M21BV91NZSW1HMJ127KZAA5K") + "\n"
+    assert attestation_line_problems(text) == []
+
+
+def test_attestation_line_problems_reports_an_incomplete_line() -> None:
+    """V5: a line missing actor, timestamp, alias or via is an error, not skipped."""
+    incomplete = '{"id": "01M21BV91NZSW1HMJ127KZAA5J", "verdict": "ratified", "body_sha256": "a"}\n'
+    problems = attestation_line_problems(incomplete)
+    assert [p.code for p in problems] == ["attestation_incomplete"]
+
+
+def test_attestation_line_problems_reports_a_malformed_line() -> None:
+    text = _line() + "\n{not json\n" + _line(id="01M21BV91NZSW1HMJ127KZAA5K") + "\n"
+    problems = attestation_line_problems(text)
+    assert [p.code for p in problems] == ["attestation_malformed"]
+
+
+def test_attestation_line_problems_reports_a_truncated_tail() -> None:
+    """A missing trailing newline on the last line is a truncated write, not a skip."""
+    text = _line() + "\n" + _line(id="01M21BV91NZSW1HMJ127KZAA5K")
+    problems = attestation_line_problems(text)
+    assert [p.code for p in problems] == ["attestation_truncated_tail"]

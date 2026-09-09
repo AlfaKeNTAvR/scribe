@@ -5,7 +5,6 @@ from scribe.record import Record
 from scribe.schema import validate_record
 from scribe.store import Store
 
-
 FIXTURES = Path(__file__).parent / "fixtures" / "records"
 
 
@@ -39,7 +38,9 @@ def test_title_allows_200_characters() -> None:
     title = "x" * 200
     record.data["title"] = title
     record.body = record.body.replace("# A sound choice", f"# {title}")
-    assert "invalid_title" not in {p.code for p in validate_record(record.data, record.body)}
+    assert "invalid_title" not in {
+        p.code for p in validate_record(record.data, record.body)
+    }
 
 
 def test_action_affect_is_valid() -> None:
@@ -55,7 +56,9 @@ def test_attestation_cross_checks(tmp_path: Path) -> None:
     (decisions / "RATIFICATIONS.jsonl").write_text("", encoding="utf-8")
     store = Store(tmp_path)
     record = store.records()[0]
-    assert "unattested_review_state" in {p.code for p in validate_record(record.data, record.body, store)}
+    assert "unattested_review_state" in {
+        p.code for p in validate_record(record.data, record.body, store)
+    }
 
 
 def test_unreviewed_record_detects_existing_attestation(tmp_path: Path) -> None:
@@ -79,7 +82,9 @@ def test_unreviewed_record_detects_existing_attestation(tmp_path: Path) -> None:
     store = Store(tmp_path)
     loaded = store.records()[0]
     problems = validate_record(loaded.data, loaded.body, store)
-    behind = [problem for problem in problems if problem.code == "state_behind_attestation"]
+    behind = [
+        problem for problem in problems if problem.code == "state_behind_attestation"
+    ]
     assert len(behind) == 1
     assert "run scribe ratify D-260908-sound-choice again" in behind[0].message
 
@@ -92,9 +97,32 @@ def test_committed_record_body_hashes_match_attestations() -> None:
         assert record.body_sha256() == attestation["body_sha256"]
 
 
+def test_wrong_type_review_state_produces_diagnostic_not_crash() -> None:
+    """V17: `review_state: []` must be an invalid_enum diagnostic, not a TypeError."""
+    record = Record.load(FIXTURES / "valid_minimal.md")
+    record.data["review_state"] = []
+    problems = validate_record(record.data, record.body)
+    assert "invalid_enum" in {p.code for p in problems}
+
+
+def test_max_ulid_produces_date_diagnostic_not_crash() -> None:
+    """V17: the maximum ULID must be a diagnostic, not an unhandled ValueError."""
+    record = Record.load(FIXTURES / "valid_minimal.md")
+    record.data["id"] = "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+    problems = validate_record(record.data, record.body)
+    assert "ulid_date_out_of_range" in {p.code for p in problems}
+    assert "invalid_ulid" not in {p.code for p in problems}
+
+
 def test_record_hash_and_apply_change() -> None:
     record = Record.load(FIXTURES / "valid_minimal.md")
     original_hash = record.body_sha256()
-    assert record.apply_change("effective_state", "implemented", "implemented", "test", at="2026-09-09T00:00:00Z")
+    assert record.apply_change(
+        "effective_state",
+        "implemented",
+        "implemented",
+        "test",
+        at="2026-09-09T00:00:00Z",
+    )
     assert record.data["history"][-1]["old"] == "proposed"
     assert record.body_sha256() == original_hash

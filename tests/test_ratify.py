@@ -270,7 +270,9 @@ def test_state_behind_diagnostic_command_parses_and_heals(
     assert code == 0
     assert stdout.startswith(f"{ratify_module.VERDICTS[verb]} {unreviewed} by @tester")
     assert len(attestation_lines(tmp_repo)) == count
-    assert load(tmp_repo, unreviewed).data["review_state"] == ratify_module.VERDICTS[verb]
+    assert (
+        load(tmp_repo, unreviewed).data["review_state"] == ratify_module.VERDICTS[verb]
+    )
     assert validate(run_cli, tmp_repo)[0] == 0
 
 
@@ -279,9 +281,7 @@ def test_recovery_uses_actor_and_timestamp_from_attestation(
 ) -> None:
     original = record_path(tmp_repo, unreviewed).read_text(encoding="utf-8")
     attested_at = "2026-09-08T21:00:00Z"
-    run_cli(
-        ["ratify", unreviewed, "--by", "@alice", "--at", attested_at], tmp_repo
-    )
+    run_cli(["ratify", unreviewed, "--by", "@alice", "--at", attested_at], tmp_repo)
     count = len(attestation_lines(tmp_repo))
     record_path(tmp_repo, unreviewed).write_text(original, encoding="utf-8")
 
@@ -465,9 +465,7 @@ def test_ratify_lock_timeout_exits_nonzero_without_ledger_writes(
     with lock_path.open("a+") as holder:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         started = time.monotonic()
-        code, stdout, _ = run_cli(
-            ["ratify", unreviewed, "--by", "@tester"], tmp_repo
-        )
+        code, stdout, _ = run_cli(["ratify", unreviewed, "--by", "@tester"], tmp_repo)
         elapsed = time.monotonic() - started
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
 
@@ -475,7 +473,9 @@ def test_ratify_lock_timeout_exits_nonzero_without_ledger_writes(
     assert code == 1
     assert stdout == "ratification lock timeout; retry the same command\n"
     assert record_path(tmp_repo, unreviewed).read_bytes() == before_record
-    assert (decisions(tmp_repo) / "RATIFICATIONS.jsonl").read_bytes() == before_attestations
+    assert (
+        decisions(tmp_repo) / "RATIFICATIONS.jsonl"
+    ).read_bytes() == before_attestations
     assert not index_path.exists()
 
 
@@ -501,6 +501,30 @@ def test_failed_index_write_is_healed_by_a_rerun(
     assert code == 0
     assert stdout.startswith("already ratified by @tester")
     assert run_cli(["index", "--check"], tmp_repo)[0] == 0
+
+
+# --- attestation ledger integrity (V5) --------------------------------------
+
+
+def test_ratify_refuses_to_append_after_a_truncated_ledger_tail(
+    run_cli: RunCli, tmp_repo: Path, unreviewed: str
+) -> None:
+    """A truncated final line (interrupted write) blocks further appends."""
+    path = decisions(tmp_repo) / "RATIFICATIONS.jsonl"
+    before_attestations = path.read_bytes()
+    before_record = record_path(tmp_repo, unreviewed).read_bytes()
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write('{"id": "01M21BV91NZSW1HMJ127KZAA5J", "verdict": "ratified"')
+
+    code, stdout, _ = run_cli(["ratify", unreviewed, "--by", "@tester"], tmp_repo)
+
+    assert code == 1
+    assert "attestation_truncated_tail" in stdout
+    assert record_path(tmp_repo, unreviewed).read_bytes() == before_record
+    assert path.read_bytes().startswith(before_attestations)
+    assert path.read_bytes() == before_attestations + (
+        b'{"id": "01M21BV91NZSW1HMJ127KZAA5J", "verdict": "ratified"'
+    )
 
 
 # --- concurrency (F8) -------------------------------------------------------------

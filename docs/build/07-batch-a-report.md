@@ -53,3 +53,43 @@ fix: Recover post-commit work and preserve retrieval inputs
 
 Finish interrupted backlink cleanup and keep injection within its path and time boundaries. Preserve explicit record inputs and make lookup, lint and relink share reachable commit checks.
 ```
+
+## Group 3
+
+Completed V5, V14 and V17. Decisions: I85-I92. Run inline in this session rather than through a Codex or Sonnet subagent (I85); no incremental commit patch file exists for this group, unlike groups 1 and 2.
+
+Files changed: src/scribe/schema.py, src/scribe/store.py, src/scribe/check.py, src/scribe/ratify.py, src/scribe/gitutil.py; tests/test_schema.py, tests/test_store.py, tests/test_check.py, tests/test_ratify.py, tests/test_gitutil.py (new); AUTONOMOUS_DECISIONS_09_08_2026.md and this report.
+
+Regression tests added, with the assertion that fails on the old code:
+
+- V17: test_wrong_type_review_state_produces_diagnostic_not_crash requires an `invalid_enum` diagnostic for `review_state: []`; old code raised `TypeError: unhashable type: 'list'` from the enum membership check before any diagnostic could be produced. test_max_ulid_produces_date_diagnostic_not_crash requires a `ulid_date_out_of_range` diagnostic for the maximum ULID `7ZZZZZZZZZZZZZZZZZZZZZZZZZ`; old code raised `ValueError: year 10889 is out of range` from the unguarded `datetime.fromtimestamp` call. test_records_skips_a_malformed_file_and_logs_instead_of_raising requires `Store.records()` to return only the loadable record and log the broken filename; old code raised `FrontMatterError` out of `records()` and returned nothing at all, including for the unrelated valid record.
+- V5: test_attestation_line_problems_reports_an_incomplete_line requires `attestation_incomplete` for a line missing alias, actor, timestamp and via; old code (no such function existed) never reported it, and `latest_attestation` silently continued past it. test_attestation_line_problems_reports_a_malformed_line and test_attestation_line_problems_reports_a_truncated_tail require `attestation_malformed` and `attestation_truncated_tail` respectively; old code skipped both kinds of line with a bare `except: continue`. test_appending_a_contradictory_attestation_fails_an_unchanged_record (tests/test_check.py) requires exit 1 with `unattested_review_state` for `RATIFIED_A` after only `RATIFICATIONS.jsonl` changes; old `_validate_changed_records` validated only files the diff touched and returned `scribe check: ok`. test_ratify_refuses_to_append_after_a_truncated_ledger_tail (tests/test_ratify.py) requires exit 1, an unchanged record and an unchanged (not further corrupted) ledger file when the ledger's last line has no trailing newline; old code appended past the truncated line regardless.
+- V14: tests/test_gitutil.py (new), against a real git repository with `src/café.py`, a tab in a filename and a double quote in a filename. test_staged_paths_preserves_special_filenames, test_diff_names_preserves_special_filenames, test_commit_changed_paths_preserves_special_filenames and its root-commit variant all require the exact filenames back; old code fed git's C-quoted output through a bare backslash-to-slash replace, corrupting the café filename's octal escapes and the tab and quote filenames. The pre-existing test_git_utilities_normalize_git_results (tests/test_store.py) asserted the backslash-to-forward-slash conversion itself and is corrected per I92 to assert the literal backslash survives unchanged instead.
+
+Suite: UV_CACHE_DIR=/tmp/scribe-uv-cache UV_OFFLINE=1 uv run pytest -q -> 389 passed, 3 skipped. Warm injection median 0.521 s; bytecode-cold 0.561 s.
+
+```text
+fix: Validate the whole ledger and decode real git pathnames
+
+Make scribe check validate every current record and the attestation ledger's structure, not only the files a range's diff touched, and refuse to let ratify or reject append past a broken ledger. Type-check schema values before membership and date conversion so a malformed field is a diagnostic, and let Store.records skip one bad file with a logged line instead of aborting. Decode git's NUL-terminated pathname output instead of guessing at backslashes, so non-ASCII, tab and quote filenames survive intact.
+```
+
+## V6
+
+Owner call: never allow deleting a committed record; `scribe check` always fails on deletion, with no escape hatch. Decisions: I93-I96. Supersedes I45.
+
+Files changed: src/scribe/check.py; tests/test_check.py; README.md; AUTONOMOUS_DECISIONS_09_08_2026.md and this report.
+
+Regression tests added, with the assertion that fails on the old code:
+
+- test_deleting_a_standalone_ratified_record_fails requires exit 1 and `record_deleted: D-260908-unreviewed-may-supersede-ratified` after that record's file is deleted on a branch; old code had no rule 6 at all and returned `scribe check: ok`.
+- test_deleting_an_entire_supersession_chain_fails_for_each_alias establishes a real supersession chain on `main`, then deletes both files on a branch; requires a `record_deleted` reason naming each alias. Old code again returned `scribe check: ok`.
+- test_renaming_a_record_file_counts_as_deleted_plus_added renames a record's file without changing its `alias` field; requires `record_deleted` for the old path (I95: the new path separately fails its own `alias_filename_mismatch`, which this test does not assert on). Old code saw no finding for either path.
+
+Suite: UV_CACHE_DIR=/tmp/scribe-uv-cache UV_OFFLINE=1 uv run pytest -q -> 389 passed, 3 skipped (same run as Group 3; V6 was implemented in the same pass).
+
+```text
+fix: Fail scribe check when a committed record is deleted
+
+A record present at the check's base ref and missing at HEAD now fails with record_deleted, naming the alias; retirement must go through expired or backtracked instead. This closes the gap I45 explicitly accepted and the owner has now reversed.
+```

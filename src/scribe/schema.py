@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .record import MUTABLE_KEYS
 from .ulid import is_valid, timestamp_ms
@@ -22,17 +22,50 @@ class Problem:
 
 
 KEYS = [
-    "id", "alias", "title", "date", "schema_version", "task_refs",
-    "review_state", "effective_state", "decided_by", "recommended_by",
-    "ratified_by", "ratified_at", "provenance", "affects",
-    "implementation_links", "tags", "reversibility", "blast_radius",
-    "regret_when", "review", "verify", "supersedes", "relates_to", "history",
+    "id",
+    "alias",
+    "title",
+    "date",
+    "schema_version",
+    "task_refs",
+    "review_state",
+    "effective_state",
+    "decided_by",
+    "recommended_by",
+    "ratified_by",
+    "ratified_at",
+    "provenance",
+    "affects",
+    "implementation_links",
+    "tags",
+    "reversibility",
+    "blast_radius",
+    "regret_when",
+    "review",
+    "verify",
+    "supersedes",
+    "relates_to",
+    "history",
 ]
 REQUIRED_NON_NULL = {
-    "id", "alias", "title", "date", "schema_version", "task_refs",
-    "review_state", "effective_state", "decided_by", "provenance", "affects",
-    "implementation_links", "tags", "reversibility", "blast_radius", "verify",
-    "relates_to", "history",
+    "id",
+    "alias",
+    "title",
+    "date",
+    "schema_version",
+    "task_refs",
+    "review_state",
+    "effective_state",
+    "decided_by",
+    "provenance",
+    "affects",
+    "implementation_links",
+    "tags",
+    "reversibility",
+    "blast_radius",
+    "verify",
+    "relates_to",
+    "history",
 }
 ALIAS_RE = re.compile(r"^D-\d{6}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 TASK_REF_RES = [
@@ -47,13 +80,26 @@ ACTION_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 VERIFY_ID_RE = re.compile(r"^[a-z0-9-]+$")
 HISTORY_EVENTS = {
-    "proposed", "implemented", "ratified", "rejected", "superseded",
-    "restored", "expired", "backtracked", "link_added", "supersedes_set",
+    "proposed",
+    "implemented",
+    "ratified",
+    "rejected",
+    "superseded",
+    "restored",
+    "expired",
+    "backtracked",
+    "link_added",
+    "supersedes_set",
     "relinked",
 }
 SECTIONS = [
-    "Question", "Criteria", "Constraints and assumptions", "Options considered",
-    "Decision", "Consequences", "Evidence",
+    "Question",
+    "Criteria",
+    "Constraints and assumptions",
+    "Options considered",
+    "Decision",
+    "Consequences",
+    "Evidence",
 ]
 
 
@@ -93,7 +139,7 @@ def _body_hash(body: str) -> str:
 def validate_record(
     mapping: dict[str, Any],
     body: str,
-    store: "Store | None" = None,
+    store: Store | None = None,
     path: str | Path | None = None,
     check_attestation: bool = True,
 ) -> list[Problem]:
@@ -129,12 +175,20 @@ def validate_record(
         error("alias_filename_mismatch", f"filename stem must equal alias {alias}")
 
     title = mapping.get("title")
-    if not _is_str(title) or not 3 <= len(title) <= 200 or "\n" in title or "\r" in title:
+    if (
+        not _is_str(title)
+        or not 3 <= len(title) <= 200
+        or "\n" in title
+        or "\r" in title
+    ):
         error("invalid_title", "title must be a single line of 3 to 200 characters")
     date_value = mapping.get("date")
     if not _valid_date(date_value):
         error("invalid_date", "date must be YYYY-MM-DD")
-    if type(mapping.get("schema_version")) is not int or mapping.get("schema_version") != 1:
+    if (
+        type(mapping.get("schema_version")) is not int
+        or mapping.get("schema_version") != 1
+    ):
         error("invalid_schema_version", "schema_version must be 1")
 
     task_refs = mapping.get("task_refs")
@@ -146,7 +200,12 @@ def validate_record(
                 error("invalid_task_ref", f"invalid task reference: {value}")
 
     _enum(mapping, "review_state", {"unreviewed", "ratified", "rejected"}, error)
-    _enum(mapping, "effective_state", {"proposed", "implemented", "superseded", "expired", "backtracked"}, error)
+    _enum(
+        mapping,
+        "effective_state",
+        {"proposed", "implemented", "superseded", "expired", "backtracked"},
+        error,
+    )
     _enum(mapping, "decided_by", {"human", "agent-recommended", "agent"}, error)
     _nullable_string(mapping, "recommended_by", error)
     _nullable_string(mapping, "ratified_by", error)
@@ -167,7 +226,9 @@ def validate_record(
     _enum(mapping, "blast_radius", {"component", "team", "cross-team", "org"}, error)
     regret = mapping.get("regret_when")
     if regret is not None and (not _is_str(regret) or len(regret) > 200):
-        error("invalid_regret_when", "regret_when must be null or at most 200 characters")
+        error(
+            "invalid_regret_when", "regret_when must be null or at most 200 characters"
+        )
     review = mapping.get("review")
     if review is not None and not _valid_date(review):
         error("invalid_review", "review must be null or YYYY-MM-DD")
@@ -186,24 +247,54 @@ def validate_record(
     has_ratifier = mapping.get("ratified_by") is not None
     has_ratified_at = mapping.get("ratified_at") is not None
     if (review_state == "unreviewed" and (has_ratifier or has_ratified_at)) or (
-        review_state in {"ratified", "rejected"} and not (has_ratifier and has_ratified_at)
+        _in_str_set(review_state, {"ratified", "rejected"})
+        and not (has_ratifier and has_ratified_at)
     ):
-        error("ratified_fields_inconsistent", "ratified_by and ratified_at must agree with review_state")
-    if mapping.get("effective_state") == "backtracked" and not sections.get("Attempted and failed", "").strip():
-        error("missing_attempted_and_failed", "backtracked records require a non-empty Attempted and failed section")
-    if mapping.get("effective_state") == "implemented" and mapping.get("implementation_links") == []:
-        warning("implemented_without_links", "implemented record has no implementation links")
+        error(
+            "ratified_fields_inconsistent",
+            "ratified_by and ratified_at must agree with review_state",
+        )
+    if (
+        mapping.get("effective_state") == "backtracked"
+        and not sections.get("Attempted and failed", "").strip()
+    ):
+        error(
+            "missing_attempted_and_failed",
+            "backtracked records require a non-empty Attempted and failed section",
+        )
+    if (
+        mapping.get("effective_state") == "implemented"
+        and mapping.get("implementation_links") == []
+    ):
+        warning(
+            "implemented_without_links",
+            "implemented record has no implementation links",
+        )
 
     if is_valid(record_id) and _valid_date(date_value):
-        ulid_date = datetime.fromtimestamp(timestamp_ms(record_id) / 1000, timezone.utc).date()
-        if abs((ulid_date - date.fromisoformat(date_value)).days) > 1:
-            warning("ulid_date_mismatch", "ULID timestamp differs from date by more than one day")
+        try:
+            ulid_date = datetime.fromtimestamp(
+                timestamp_ms(record_id) / 1000, timezone.utc
+            ).date()
+        except (OverflowError, OSError, ValueError):
+            warning(
+                "ulid_date_out_of_range",
+                "ULID timestamp is outside the representable date range",
+            )
+        else:
+            if abs((ulid_date - date.fromisoformat(date_value)).days) > 1:
+                warning(
+                    "ulid_date_mismatch",
+                    "ULID timestamp differs from date by more than one day",
+                )
 
     if store is not None:
         if supersedes is not None:
             target = store.resolve(supersedes)
             if target is None:
-                error("dangling_reference", f"supersedes does not resolve: {supersedes}")
+                error(
+                    "dangling_reference", f"supersedes does not resolve: {supersedes}"
+                )
             elif target.data.get("id") == record_id:
                 error("self_supersedes", "a record may not supersede itself")
         if isinstance(relates, list):
@@ -211,25 +302,46 @@ def validate_record(
                 if store.resolve(value) is None:
                     error("dangling_reference", f"relates_to does not resolve: {value}")
         if mapping.get("effective_state") == "superseded":
-            incoming = any(predecessor.data.get("id") == record_id for _, predecessor in store.effective_edges())
+            incoming = any(
+                predecessor.data.get("id") == record_id
+                for _, predecessor in store.effective_edges()
+            )
             if not incoming:
-                warning("superseded_without_successor", "superseded record has no effective successor")
+                warning(
+                    "superseded_without_successor",
+                    "superseded record has no effective successor",
+                )
         if check_attestation:
             attestation = store.latest_attestation(record_id)
-            if review_state in {"ratified", "rejected"}:
-                if not attestation or attestation.get("verdict") != review_state or attestation.get("body_sha256") != _body_hash(body):
-                    error("unattested_review_state", "review state has no matching current-body attestation")
+            if _in_str_set(review_state, {"ratified", "rejected"}):
+                if (
+                    not attestation
+                    or attestation.get("verdict") != review_state
+                    or attestation.get("body_sha256") != _body_hash(body)
+                ):
+                    error(
+                        "unattested_review_state",
+                        "review state has no matching current-body attestation",
+                    )
             elif review_state == "unreviewed" and attestation:
                 verdict = attestation.get("verdict", "ratify")
                 command = {"ratified": "ratify", "rejected": "reject"}.get(
                     verdict, verdict
                 )
-                error("state_behind_attestation", f"run scribe {command} {alias} again to apply the recorded verdict")
+                error(
+                    "state_behind_attestation",
+                    f"run scribe {command} {alias} again to apply the recorded verdict",
+                )
     return problems
 
 
+def _in_str_set(value: Any, options: Any) -> bool:
+    """Membership on a set of strings, false (not a crash) for an unhashable value."""
+    return isinstance(value, str) and value in options
+
+
 def _enum(mapping: dict[str, Any], key: str, allowed: set[str], error: Any) -> None:
-    if mapping.get(key) not in allowed:
+    if not _in_str_set(mapping.get(key), allowed):
         error("invalid_enum", f"{key} must be one of {', '.join(sorted(allowed))}")
 
 
@@ -239,15 +351,25 @@ def _nullable_string(mapping: dict[str, Any], key: str, error: Any) -> None:
 
 
 def _validate_provenance(value: Any, error: Any) -> None:
-    keys = {"authored_by", "agent", "model", "session", "prompt_ids", "trigger", "source_messages"}
+    keys = {
+        "authored_by",
+        "agent",
+        "model",
+        "session",
+        "prompt_ids",
+        "trigger",
+        "source_messages",
+    }
     if not isinstance(value, dict):
         error("invalid_type", "provenance must be a mapping")
         return
     if set(value) != keys:
         error("invalid_provenance", "provenance must contain exactly the required keys")
-    if value.get("authored_by") not in {"human", "agent", "agent-drafted"}:
+    if not _in_str_set(value.get("authored_by"), {"human", "agent", "agent-drafted"}):
         error("invalid_enum", "invalid provenance.authored_by")
-    if value.get("trigger") not in {"user-prompt", "hook", "automation", "self-initiated"}:
+    if not _in_str_set(
+        value.get("trigger"), {"user-prompt", "hook", "automation", "self-initiated"}
+    ):
         error("invalid_enum", "invalid provenance.trigger")
     for key in ("agent", "model", "session"):
         if value.get(key) is not None and not _is_str(value.get(key)):
@@ -262,11 +384,22 @@ def _validate_affects(value: Any, error: Any) -> None:
         error("invalid_type", "affects must be a list")
         return
     for item in value:
-        if not isinstance(item, dict) or not {"type", "pattern"} <= set(item) or set(item) - {"type", "pattern", "negate"}:
-            error("invalid_affects", "affects items require type and pattern, with optional negate")
+        if (
+            not isinstance(item, dict)
+            or not {"type", "pattern"} <= set(item)
+            or set(item) - {"type", "pattern", "negate"}
+        ):
+            error(
+                "invalid_affects",
+                "affects items require type and pattern, with optional negate",
+            )
             continue
-        kind, pattern, negate = item.get("type"), item.get("pattern"), item.get("negate", False)
-        if kind not in {"path", "package", "action"}:
+        kind, pattern, negate = (
+            item.get("type"),
+            item.get("pattern"),
+            item.get("negate", False),
+        )
+        if not _in_str_set(kind, {"path", "package", "action"}):
             error("invalid_affects", "affects type must be path, package, or action")
         if not _is_str(pattern) or not pattern:
             error("invalid_affects", "affects pattern must be a non-empty string")
@@ -284,8 +417,15 @@ def _validate_links(value: Any, error: Any) -> None:
         return
     for item in value:
         if not isinstance(item, dict) or set(item) != {"commit", "paths"}:
-            error("invalid_implementation_link", "implementation link requires commit and paths")
-        elif not _is_str(item["commit"]) or not COMMIT_RE.fullmatch(item["commit"]) or not _is_list_of_strings(item["paths"]):
+            error(
+                "invalid_implementation_link",
+                "implementation link requires commit and paths",
+            )
+        elif (
+            not _is_str(item["commit"])
+            or not COMMIT_RE.fullmatch(item["commit"])
+            or not _is_list_of_strings(item["paths"])
+        ):
             error("invalid_implementation_link", "invalid implementation link")
 
 
@@ -296,22 +436,30 @@ def _validate_verify(value: Any, error: Any) -> None:
         return
     for item in value:
         if not isinstance(item, dict) or set(item) != keys:
-            error("invalid_verify", "verify item must contain exactly the required keys")
+            error(
+                "invalid_verify", "verify item must contain exactly the required keys"
+            )
             continue
         if not _is_str(item["id"]) or not VERIFY_ID_RE.fullmatch(item["id"]):
-            error("invalid_verify", "verify id must contain lowercase letters, digits, or hyphens")
+            error(
+                "invalid_verify",
+                "verify id must contain lowercase letters, digits, or hyphens",
+            )
         engine = item["engine"]
         if engine == "jsonpath":
-            error("unsupported_engine", "jsonpath is on the README allowlist but not implemented in this release")
+            error(
+                "unsupported_engine",
+                "jsonpath is on the README allowlist but not implemented in this release",
+            )
         elif engine != "grep":
             error("unknown_engine", f"unknown verify engine: {engine}")
         if not _is_str(item["pattern"]):
             error("invalid_verify", "verify pattern must be a string")
         if not _is_list_of_strings(item["paths"]):
             error("invalid_verify", "verify paths must be a list of strings")
-        if item["expect"] not in {"match", "no-match"}:
+        if not _in_str_set(item["expect"], {"match", "no-match"}):
             error("invalid_verify", "verify expect must be match or no-match")
-        if item["severity"] not in {"error", "warning"}:
+        if not _in_str_set(item["severity"], {"error", "warning"}):
             error("invalid_verify", "verify severity must be error or warning")
 
 
@@ -324,7 +472,11 @@ def _validate_history(value: Any, error: Any) -> None:
         if not isinstance(item, dict):
             error("invalid_history", "history entries must be mappings")
             continue
-        if item.get("event") not in HISTORY_EVENTS or not _is_str(item.get("by")) or not _valid_datetime(item.get("at")):
+        if (
+            not _in_str_set(item.get("event"), HISTORY_EVENTS)
+            or not _is_str(item.get("by"))
+            or not _valid_datetime(item.get("at"))
+        ):
             error("invalid_history", f"invalid history entry at index {index}")
         at = item.get("at")
         if _is_str(at) and previous and at < previous:
@@ -332,10 +484,19 @@ def _validate_history(value: Any, error: Any) -> None:
         if _is_str(at):
             previous = at
         field = item.get("field")
-        if field is not None and field not in MUTABLE_KEYS:
+        if field is not None and not _in_str_set(field, MUTABLE_KEYS):
             error("history_immutable_field", f"history names immutable field: {field}")
-        if item.get("event") not in {"proposed", "link_added", "relinked"} and not {"field", "old", "new"} <= set(item):
-            error("invalid_history", f"history event {item.get('event')} requires field, old, and new")
+        if not _in_str_set(
+            item.get("event"), {"proposed", "link_added", "relinked"}
+        ) and not {
+            "field",
+            "old",
+            "new",
+        } <= set(item):
+            error(
+                "invalid_history",
+                f"history event {item.get('event')} requires field, old, and new",
+            )
     if isinstance(value[0], dict) and value[0].get("event") != "proposed":
         error("invalid_history", "first history event must be proposed")
 
@@ -351,9 +512,16 @@ def _validate_body(body: str, title: Any, state: Any, error: Any) -> dict[str, s
     for name in names:
         if name not in allowed:
             error("unexpected_section", f"unexpected H2 section: {name}")
-    expected = SECTIONS[:-1] + (["Attempted and failed"] if "Attempted and failed" in names else []) + ["Evidence"]
+    expected = (
+        SECTIONS[:-1]
+        + (["Attempted and failed"] if "Attempted and failed" in names else [])
+        + ["Evidence"]
+    )
     if names != expected:
-        error("invalid_section_order", "required H2 sections are missing, duplicated, or out of order")
+        error(
+            "invalid_section_order",
+            "required H2 sections are missing, duplicated, or out of order",
+        )
     sections: dict[str, str] = {}
     for position, (start, name) in enumerate(h2s):
         end = h2s[position + 1][0] if position + 1 < len(h2s) else len(lines)
@@ -361,16 +529,28 @@ def _validate_body(body: str, title: Any, state: Any, error: Any) -> dict[str, s
     for name in SECTIONS:
         if not sections.get(name, "").strip():
             error("empty_section", f"section must be non-empty: {name}")
-    if h1s and not any(line.startswith(">") and line[1:].strip() for line in lines[h1s[0][0] + 1 : h2s[0][0] if h2s else len(lines)]):
-        error("missing_y_statement", "a blockquoted Y-statement is required after the H1")
+    if h1s and not any(
+        line.startswith(">") and line[1:].strip()
+        for line in lines[h1s[0][0] + 1 : h2s[0][0] if h2s else len(lines)]
+    ):
+        error(
+            "missing_y_statement", "a blockquoted Y-statement is required after the H1"
+        )
     evidence = sections.get("Evidence", "")
-    if not any(line.startswith(">") and line[1:].strip() for line in evidence.splitlines()):
+    if not any(
+        line.startswith(">") and line[1:].strip() for line in evidence.splitlines()
+    ):
         error("missing_evidence_quote", "Evidence must contain a non-empty blockquote")
     options = sections.get("Options considered", "")
-    table_lines = [line.strip() for line in options.splitlines() if line.strip().startswith("|")]
+    table_lines = [
+        line.strip() for line in options.splitlines() if line.strip().startswith("|")
+    ]
     header = "| Option | For | Against | Evidence | Why rejected |"
     if not table_lines or table_lines[0] != header or len(table_lines) < 4:
-        error("invalid_options_table", "Options considered requires the exact header and at least two data rows")
+        error(
+            "invalid_options_table",
+            "Options considered requires the exact header and at least two data rows",
+        )
     else:
         rows = table_lines[2:]
         chosen = 0
@@ -381,5 +561,8 @@ def _validate_body(body: str, title: Any, state: Any, error: Any) -> dict[str, s
                 valid_rows += 1
                 chosen += cells[-1] == "chosen"
         if valid_rows < 2 or chosen != 1:
-            error("invalid_options_table", "Options considered needs at least two rows and exactly one chosen row")
+            error(
+                "invalid_options_table",
+                "Options considered needs at least two rows and exactly one chosen row",
+            )
     return sections

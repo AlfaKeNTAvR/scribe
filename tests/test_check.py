@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import subprocess
 import json
+import subprocess
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -150,15 +150,24 @@ def test_a_decision_trailer_in_the_range_fails(run_cli: RunCli, ledger: Path) ->
     assert f"{successor} supersedes ratified {RATIFIED_A}" in stdout
 
 
-@pytest.mark.parametrize("affects,changed,denied", [
-    ([], "src/x.py", True),
-    ([{"type": "action", "pattern": "npm-publish"}], "src/x.py", True),
-    ([{"type": "package", "pattern": "scribe"}], "src/x.py", True),
-    ([{"type": "path", "pattern": "src/**"},
-      {"type": "path", "pattern": "src/x.py", "negate": True}], "src/x.py", False),
-    ([{"type": "path", "pattern": "docs/**"}], "docs/decisions/notes.md", False),
-    ([], "docs/decisions/notes.md", False),
-])
+@pytest.mark.parametrize(
+    "affects,changed,denied",
+    [
+        ([], "src/x.py", True),
+        ([{"type": "action", "pattern": "npm-publish"}], "src/x.py", True),
+        ([{"type": "package", "pattern": "scribe"}], "src/x.py", True),
+        (
+            [
+                {"type": "path", "pattern": "src/**"},
+                {"type": "path", "pattern": "src/x.py", "negate": True},
+            ],
+            "src/x.py",
+            False,
+        ),
+        ([{"type": "path", "pattern": "docs/**"}], "docs/decisions/notes.md", False),
+        ([], "docs/decisions/notes.md", False),
+    ],
+)
 def test_dependency_gate_uses_implementation_paths(
     run_cli: RunCli, ledger: Path, affects: list, changed: str, denied: bool
 ) -> None:
@@ -238,6 +247,100 @@ def test_rewriting_history_fails_with_history_rewritten(
 
     assert code == 1
     assert "history_rewritten" in stdout
+
+
+def test_appending_a_contradictory_attestation_fails_an_unchanged_record(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """V5: every current record is validated, not only the ones the diff touched.
+
+    Only `RATIFICATIONS.jsonl` changes here; `RATIFIED_A`'s own file is
+    untouched. The old code validated changed record files only, so this
+    passed; the fix validates every current record, so the record's now
+    unattested `ratified` state fails the check.
+    """
+    from scribe.record import Record
+
+    git(ledger, "checkout", "-q", "-b", "contradict")
+    record = Record.load(decisions(ledger) / f"{RATIFIED_A}.md")
+    line = {
+        "id": record.data["id"],
+        "alias": RATIFIED_A,
+        "verdict": "rejected",
+        "by": "@tester",
+        "at": "2026-09-08T21:00:00Z",
+        "body_sha256": record.body_sha256(),
+        "via": "cli",
+    }
+    path = decisions(ledger) / "RATIFICATIONS.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line) + "\n")
+    commit_all(ledger, "chore: Append a contradictory rejection")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"{RATIFIED_A}.md: unattested_review_state" in stdout
+
+
+# --- record deletion (plan 5.4 rule 6, V6, supersedes I45) -------------------
+
+
+def test_deleting_a_standalone_ratified_record_fails(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    git(ledger, "checkout", "-q", "-b", "delete-standalone")
+    (decisions(ledger) / f"{RATIFIED_A}.md").unlink()
+    commit_all(ledger, "chore: Delete a ratified record")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"record_deleted: {RATIFIED_A}" in stdout
+    assert "retire it with expired or backtracked" in stdout
+
+
+def test_deleting_an_entire_supersession_chain_fails_for_each_alias(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """Both the predecessor and its successor must fail, each by its own alias."""
+    assert run_cli(["new", "--spec", str(SPEC_SUPERSEDES)], ledger)[0] == 0
+    successor = today_alias(SUCCESSOR_SLUG)
+    assert run_cli(["ratify", successor, "--by", "@tester"], ledger)[0] == 0
+    commit_all(ledger, "feat: Establish a supersession chain")
+
+    git(ledger, "checkout", "-q", "-b", "delete-chain")
+    (decisions(ledger) / f"{RATIFIED_A}.md").unlink()
+    (decisions(ledger) / f"{successor}.md").unlink()
+    commit_all(ledger, "chore: Delete both records in the chain")
+
+    code, stdout = check(run_cli, ledger, base="main")
+
+    assert code == 1
+    assert f"record_deleted: {RATIFIED_A}" in stdout
+    assert f"record_deleted: {successor}" in stdout
+
+
+def test_renaming_a_record_file_counts_as_deleted_plus_added(
+    run_cli: RunCli, ledger: Path
+) -> None:
+    """A rename is a deletion of the old path; the new path is an ordinary addition.
+
+    There is no rename detection here (tree listings, not a diff heuristic),
+    and this repo's `alias` is not updated to match, so the new path also
+    fails its own `alias_filename_mismatch` validation; that second failure
+    is not this test's concern.
+    """
+    git(ledger, "checkout", "-q", "-b", "rename")
+    old_path = decisions(ledger) / f"{RATIFIED_A}.md"
+    new_path = decisions(ledger) / "D-260908-renamed-record.md"
+    old_path.rename(new_path)
+    commit_all(ledger, "chore: Rename a record file")
+
+    code, stdout = check(run_cli, ledger)
+
+    assert code == 1
+    assert f"record_deleted: {RATIFIED_A}" in stdout
 
 
 # --- argument handling -------------------------------------------------------

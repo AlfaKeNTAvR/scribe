@@ -15,6 +15,7 @@ from . import gitutil
 from .frontmatter import split
 from .history_check import (
     ATTESTATIONS_PATH,
+    DECISIONS_DIR,
     check_attestations_append_only,
     check_records_against_base,
 )
@@ -22,7 +23,7 @@ from .index import check_index
 from .links import implementation_paths
 from .record import Record
 from .schema import validate_record
-from .store import Store
+from .store import Store, attestation_line_problems
 
 OK_MESSAGE = "scribe check: ok"
 
@@ -87,24 +88,20 @@ def _supersede_gate(
     return reasons
 
 
-def _changed_record_paths(store: Store, changed_paths: list[str]) -> list[str]:
-    prefix = _relative_to_root(store, store.path) + "/"
-    return [
-        path
-        for path in changed_paths
-        if path.startswith(prefix)
-        and path.endswith(".md")
-        and path.rsplit("/", 1)[-1].startswith("D-")
-    ]
+def _validate_all_records(store: Store) -> list[str]:
+    """Rule 2: every current record still validates, attestations included.
 
-
-def _validate_changed_records(store: Store, changed_paths: list[str]) -> list[str]:
-    """Rule 2: every record the range touched still validates, attestations included."""
+    Validated by path (not `store.records()`), so a malformed file still
+    surfaces its own `parse_error` instead of being silently skipped from the
+    collection (V17 makes `store.records()` resilient for the *other*
+    consumers of the store; the CI gate needs the opposite). Every record is
+    checked, not only the ones the range's diff touched: an append to
+    RATIFICATIONS.jsonl can make an otherwise-unchanged record's review state
+    contradict its latest attestation, and that must still fail the check (V5).
+    """
     reasons: list[str] = []
-    for relative in _changed_record_paths(store, changed_paths):
-        target = store.root / relative
-        if not target.is_file():
-            continue
+    for target in sorted(store.path.glob("D-*.md")):
+        relative = _relative_to_root(store, target)
         try:
             record = Record.load(target)
             problems = validate_record(
@@ -129,6 +126,50 @@ def _index_stale(store: Store) -> list[str]:
     return [f"{_relative_to_root(store, target)}: index_stale: run scribe index"]
 
 
+def _attestation_integrity(store: Store) -> list[str]:
+    """Rule 4b: the current ledger has no malformed, incomplete or truncated line (V5)."""
+    path = store.path / "RATIFICATIONS.jsonl"
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    return [
+        f"{ATTESTATIONS_PATH}: {problem.code}: {problem.message}"
+        for problem in attestation_line_problems(text)
+    ]
+
+
+def _alias_at(root: Path, rev: str, path: str) -> str:
+    """The alias a deleted record carried at `rev`, falling back to its filename stem."""
+    text = gitutil.show_blob(rev, path, root)
+    if text is not None:
+        try:
+            data, _ = split(text)
+        except ValueError:
+            data = {}
+        alias = data.get("alias")
+        if isinstance(alias, str) and alias:
+            return alias
+    return Path(path).stem
+
+
+def _deleted_record_reasons(store: Store, base: str) -> list[str]:
+    """Rule 6: a record present at the base and gone at the tip must not merge (V6).
+
+    Retirement goes through `expired` or `backtracked`; deleting the file
+    bypasses the ledger's immutability, so the owner's call is that this
+    always fails, with no `--allow-delete` escape (supersedes I45).
+    """
+    root = store.root
+    base_paths = set(gitutil.tree_record_paths(base, DECISIONS_DIR, root))
+    head_paths = set(gitutil.tree_record_paths("HEAD", DECISIONS_DIR, root))
+    return [
+        f"{path}: record_deleted: {_alias_at(root, base, path)} was present at "
+        f"{base} and is missing at HEAD; retire it with expired or backtracked "
+        "instead of deleting the file"
+        for path in sorted(base_paths - head_paths)
+    ]
+
+
 def check_range(store: Store, base: str) -> list[str]:
     """Every reason this range must not merge, in plan 5.4 rule order."""
     root = store.root
@@ -137,8 +178,9 @@ def check_range(store: Store, base: str) -> list[str]:
     commits = gitutil.rev_list_range(base, "HEAD", root)
 
     reasons = _supersede_gate(store, fork_point, changed_paths, commits)
-    reasons.extend(_validate_changed_records(store, changed_paths))
+    reasons.extend(_validate_all_records(store))
     reasons.extend(_index_stale(store))
+    reasons.extend(_attestation_integrity(store))
     reasons.extend(
         f"{ATTESTATIONS_PATH}: {problem.code}: {problem.message}"
         for problem in check_attestations_append_only(fork_point, root)
@@ -147,6 +189,7 @@ def check_range(store: Store, base: str) -> list[str]:
         f"{path}: {problem.code}: {problem.message}"
         for path, problem in check_records_against_base(fork_point, root)
     )
+    reasons.extend(_deleted_record_reasons(store, fork_point))
     return reasons
 
 

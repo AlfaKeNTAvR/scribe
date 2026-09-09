@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .record import Record
+from .schema import Problem
+from .state import log_hook_error
+
+REQUIRED_ATTESTATION_KEYS = ("id", "alias", "verdict", "by", "at", "via", "body_sha256")
 
 
 class Store:
@@ -20,7 +25,7 @@ class Store:
         self._records: list[Record] | None = None
 
     @classmethod
-    def discover(cls, start: str | Path = ".") -> "Store | None":
+    def discover(cls, start: str | Path = ".") -> Store | None:
         candidate = Path(start).resolve()
         if candidate.is_file():
             candidate = candidate.parent
@@ -39,10 +44,21 @@ class Store:
         return None
 
     def records(self, refresh: bool = False) -> list[Record]:
+        """Every loadable record; a malformed file is skipped and logged (V17).
+
+        One bad file must not abort the whole collection: callers such as the
+        supersede gate, the index, and lint all need the other records to
+        still resolve, and `scribe validate` already reports a malformed file
+        on its own by loading it directly rather than through the store.
+        """
         if self._records is None or refresh:
-            self._records = [
-                Record.load(path) for path in sorted(self.path.glob("D-*.md"))
-            ]
+            loaded: list[Record] = []
+            for path in sorted(self.path.glob("D-*.md")):
+                try:
+                    loaded.append(Record.load(path))
+                except (OSError, ValueError) as exc:
+                    log_hook_error(self.root, f"scribe: skipped {path.name}: {exc}")
+            self._records = loaded
         return self._records
 
     def __iter__(self) -> Iterable[Record]:
@@ -91,6 +107,68 @@ class Store:
             if isinstance(item, dict) and item.get("id") == record_id:
                 latest = item
         return latest
+
+
+def attestation_line_problems(text: str) -> list[Problem]:
+    """Structural problems in RATIFICATIONS.jsonl content (V5).
+
+    `Store.latest_attestation` above skips a bad line so lookups stay best
+    effort; this function is the one that reports every malformed or
+    incomplete line, and a truncated final line, as an error instead of
+    silently dropping it. `scribe check` runs it over the whole file and
+    `ratify`/`reject` run it before appending, so a broken ledger is never
+    written past.
+    """
+    problems: list[Problem] = []
+    if not text:
+        return problems
+    truncated_tail = not text.endswith("\n")
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return problems
+    last_index = len(lines) - 1
+    if truncated_tail:
+        problems.append(
+            Problem(
+                "error",
+                "attestation_truncated_tail",
+                f"line {last_index + 1}: the final attestation line is truncated "
+                "(no trailing newline)",
+            )
+        )
+    for index, line in enumerate(lines):
+        try:
+            item = json.loads(line)
+        except (json.JSONDecodeError, TypeError) as exc:
+            if index == last_index and truncated_tail:
+                continue  # already reported as attestation_truncated_tail
+            problems.append(
+                Problem(
+                    "error",
+                    "attestation_malformed",
+                    f"line {index + 1}: malformed JSON: {exc}",
+                )
+            )
+            continue
+        if not isinstance(item, dict):
+            problems.append(
+                Problem(
+                    "error",
+                    "attestation_malformed",
+                    f"line {index + 1}: attestation line is not a JSON object",
+                )
+            )
+            continue
+        missing = [key for key in REQUIRED_ATTESTATION_KEYS if not item.get(key)]
+        if missing:
+            problems.append(
+                Problem(
+                    "error",
+                    "attestation_incomplete",
+                    f"line {index + 1}: missing {', '.join(missing)}",
+                )
+            )
+    return problems
 
 
 def reconcile_supersession(records: list[Record], by: str) -> list[Record]:

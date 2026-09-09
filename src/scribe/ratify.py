@@ -20,7 +20,7 @@ from pathlib import Path
 from .index import write_index
 from .record import Record, utc_now
 from .state import locked, state_dir
-from .store import Store, reconcile_supersession
+from .store import Store, attestation_line_problems, reconcile_supersession
 
 LOCK_FILE = "ratify.lock"
 ATTESTATIONS_FILE = "RATIFICATIONS.jsonl"
@@ -75,6 +75,21 @@ def _finish(store: Store, verb: str) -> None:
     write_index(store)
 
 
+def _ledger_broken(store: Store) -> str | None:
+    """V5: refuse to append after a malformed, incomplete or truncated line."""
+    path = attestations_path(store)
+    if not path.is_file():
+        return None
+    problems = attestation_line_problems(path.read_text(encoding="utf-8"))
+    if not problems:
+        return None
+    first = problems[0]
+    return (
+        f"{ATTESTATIONS_FILE} is broken ({first.code}: {first.message}); "
+        "repair it by hand before ratifying or rejecting"
+    )
+
+
 def apply_verdict(
     store: Store,
     token: str,
@@ -89,6 +104,9 @@ def apply_verdict(
     with locked(state_dir(store.root) / LOCK_FILE) as acquired:
         if not acquired:
             return Outcome(1, "ratification lock timeout; retry the same command")
+        broken = _ledger_broken(store)
+        if broken is not None:
+            return Outcome(1, broken)
         record = store.resolve(token)
         if record is None:
             return Outcome(1, f"unknown record: {token}")

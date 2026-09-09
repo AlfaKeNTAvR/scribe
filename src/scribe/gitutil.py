@@ -13,6 +13,19 @@ def _git(cwd: str | Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _paths_from_z(result: subprocess.CompletedProcess[str]) -> list[str]:
+    """Decode `-z` (NUL-terminated) pathname output (V14).
+
+    `-z` disables git's default C-style quoting of non-ASCII, tab, quote and
+    backslash bytes in a pathname, so every field here is the real filename
+    and is returned as is: a literal backslash in a name is not a Windows
+    separator and must not be rewritten to `/`.
+    """
+    if result.returncode != 0:
+        return []
+    return [field for field in result.stdout.split("\0") if field]
+
+
 def toplevel(cwd: str | Path = ".") -> Path | None:
     result = _git(cwd, "rev-parse", "--show-toplevel")
     if result.returncode != 0:
@@ -21,10 +34,8 @@ def toplevel(cwd: str | Path = ".") -> Path | None:
 
 
 def staged_paths(cwd: str | Path = ".") -> list[str]:
-    result = _git(cwd, "diff", "--cached", "--name-only", "--diff-filter=ACMR")
-    if result.returncode != 0:
-        return []
-    return [line.replace("\\", "/") for line in result.stdout.splitlines() if line]
+    result = _git(cwd, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
+    return _paths_from_z(result)
 
 
 def git_path(name: str, cwd: str | Path = ".") -> Path | None:
@@ -155,10 +166,10 @@ def staged_paths_against(base: str, cwd: str | Path = ".") -> list[str]:
     amended commit's parent so the pending filter sees the whole amended
     content, not only what was staged since the original commit (F14).
     """
-    result = _git(cwd, "diff", "--cached", "--name-only", "--diff-filter=ACMR", base)
-    if result.returncode != 0:
-        return []
-    return [line.replace("\\", "/") for line in result.stdout.splitlines() if line]
+    result = _git(
+        cwd, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", base
+    )
+    return _paths_from_z(result)
 
 
 def parent_or_empty_tree(rev: str, cwd: str | Path = ".") -> str:
@@ -194,14 +205,12 @@ def head_sha(cwd: str | Path = ".") -> str | None:
 def commit_changed_paths(rev: str = "HEAD", cwd: str | Path = ".") -> list[str]:
     """Paths a commit touched; a root commit falls back to `git show --name-only`."""
     if rev_parse_commit(f"{rev}^", cwd) is None:
-        result = _git(cwd, "show", "--name-only", "--format=", rev)
+        result = _git(cwd, "show", "--name-only", "-z", "--format=", rev)
     else:
-        result = _git(cwd, "diff-tree", "--no-commit-id", "--name-only", "-r", rev)
-    if result.returncode != 0:
-        return []
-    return [
-        line.replace("\\", "/") for line in result.stdout.splitlines() if line.strip()
-    ]
+        result = _git(
+            cwd, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", rev
+        )
+    return _paths_from_z(result)
 
 
 def merge_base(first: str, second: str = "HEAD", cwd: str | Path = ".") -> str | None:
@@ -214,11 +223,9 @@ def merge_base(first: str, second: str = "HEAD", cwd: str | Path = ".") -> str |
 
 
 def diff_names(base: str, head: str = "HEAD", cwd: str | Path = ".") -> list[str]:
-    """Repository-relative paths changed by `base...head`, forward slashes."""
-    result = _git(cwd, "diff", "--name-only", f"{base}...{head}")
-    if result.returncode != 0:
-        return []
-    return [line.replace("\\", "/") for line in result.stdout.splitlines() if line]
+    """Repository-relative paths changed by `base...head`."""
+    result = _git(cwd, "diff", "--name-only", "-z", f"{base}...{head}")
+    return _paths_from_z(result)
 
 
 def rev_list_range(base: str, head: str = "HEAD", cwd: str | Path = ".") -> list[str]:
@@ -243,10 +250,8 @@ def tree_record_paths(
     cwd: str | Path = ".",
 ) -> list[str]:
     """Decision record paths present at `rev` under `subdir`."""
-    result = _git(cwd, "ls-tree", "-r", "--name-only", rev, "--", subdir)
-    if result.returncode != 0:
-        return []
-    paths = [line.replace("\\", "/") for line in result.stdout.splitlines() if line]
+    result = _git(cwd, "ls-tree", "-r", "--name-only", "-z", rev, "--", subdir)
+    paths = _paths_from_z(result)
     return [
         path
         for path in paths
