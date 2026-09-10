@@ -73,6 +73,24 @@ def _paths_from_z(result: subprocess.CompletedProcess[bytes]) -> list[str]:
     return [os.fsdecode(field) for field in result.stdout.split(b"\0") if field]
 
 
+def working_tree_files(cwd: str | Path = ".") -> list[str] | None:
+    """Every path git shows in the working tree, ignored ones excluded.
+
+    Tracked files plus untracked files that `.gitignore` does not cover, which
+    is what a reader means by "the files in this repository". Walking the
+    directory instead pulls in a virtualenv or a build directory, and a
+    `verify` glob without a slash matches at any depth by design, so `LICENSE`
+    would match every vendored licence under `.venv`. Returns None when git
+    fails, so the caller can fall back to walking the tree.
+    """
+    result = _git_bytes(
+        cwd, "ls-files", "-z", "--cached", "--others", "--exclude-standard"
+    )
+    if result.returncode != 0:
+        return None
+    return sorted(set(_paths_from_z(result)))
+
+
 def toplevel(cwd: str | Path = ".") -> Path | None:
     result = _git(cwd, "rev-parse", "--show-toplevel")
     if result.returncode != 0:

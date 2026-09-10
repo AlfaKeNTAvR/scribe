@@ -8,7 +8,6 @@ and no `verify_error`.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import subprocess
@@ -20,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from locking import fcntl, requires_flock
 from scribe import ulid
 from scribe.frontmatter import join, split
 from scribe.lint import (
@@ -253,6 +253,7 @@ def test_a_stale_index_is_an_error_and_fix_index_regenerates_it(
     assert lint(run_cli, lint_repo)[1] == []
 
 
+@requires_flock
 def test_lint_index_check_lock_timeout_reports_error_and_writes_nothing(
     run_cli: RunCli, lint_repo: Path
 ) -> None:
@@ -286,6 +287,7 @@ def test_lint_index_check_lock_timeout_reports_error_and_writes_nothing(
     assert after == before
 
 
+@requires_flock
 def test_lint_fix_index_lock_timeout_reports_error_and_writes_nothing(
     run_cli: RunCli, lint_repo: Path
 ) -> None:
@@ -564,6 +566,7 @@ def test_expire_leaves_a_young_proposal_alone(run_cli: RunCli, lint_repo: Path) 
     assert Record.load(path).data["effective_state"] == "proposed"
 
 
+@requires_flock
 def test_expire_lock_timeout_reports_error_and_changes_nothing(
     run_cli: RunCli, lint_repo: Path
 ) -> None:
@@ -1135,6 +1138,27 @@ def test_pending_ids_that_resolve_to_no_record_are_reported_and_pruned(
         (lint_repo / ".claude" / "scribe" / "state.json").read_text(encoding="utf-8")
     )
     assert state["sessions"]["session_test"]["pending_decisions"] == [ULID_A]
+
+
+def test_verify_globs_ignore_gitignored_copies(tmp_repo: Path) -> None:
+    """A vendored copy under an ignored directory is not a file to verify.
+
+    A `verify` glob without a slash matches at any depth, so before this the
+    `LICENSE` of every dependency inside `.venv` was checked and reported as
+    a failure of the record that named `LICENSE`.
+    """
+    from scribe.lint import _repo_files
+
+    (tmp_repo / ".gitignore").write_text(".venv/\n", encoding="utf-8")
+    vendored = tmp_repo / ".venv" / "lib" / "some-package"
+    vendored.mkdir(parents=True)
+    (vendored / "LICENSE").write_text("MIT License\n", encoding="utf-8")
+    (tmp_repo / "LICENSE").write_text("Apache License\n", encoding="utf-8")
+
+    listed = _repo_files(tmp_repo)
+
+    assert "LICENSE" in listed
+    assert not [path for path in listed if path.startswith(".venv/")]
 
 
 # --- acceptance on this repository --------------------------------------------

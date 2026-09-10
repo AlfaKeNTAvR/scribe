@@ -69,7 +69,17 @@ def _relative(store: Store, path: Path) -> str:
 
 
 def _repo_files(root: Path) -> list[str]:
-    """Every file in the working tree, repository-relative, minus `.git/`."""
+    """The files `verify` globs are matched against, repository-relative.
+
+    Git decides the list, so anything `.gitignore` covers is out: a `.venv`
+    inside the repository holds a `LICENSE` for every dependency, and a
+    `verify` glob with no slash matches at any depth, so those copies would be
+    checked and reported as failures. Outside a repository, or when git
+    cannot answer, fall back to walking the tree minus `.git/`.
+    """
+    listed = gitutil.working_tree_files(root)
+    if listed is not None:
+        return listed
     found: list[str] = []
     for directory, subdirectories, filenames in os.walk(root):
         subdirectories[:] = [
