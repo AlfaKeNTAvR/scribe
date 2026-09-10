@@ -1,0 +1,36 @@
+{
+  "title": "INDEX.md renders one heading per record with one bullet per field (state, by, review, title, affects, regret) instead of one pipe-separated line, so editors can collapse and read it",
+  "slug": "write-index-heading-per-record",
+  "decided_by": "human",
+  "recommended_by": "claude-code",
+  "provenance": {"authored_by": "agent-drafted", "agent": "claude-code", "trigger": "user-prompt"},
+  "affects": [
+    {"type": "path", "pattern": "src/scribe/index.py"}
+  ],
+  "tags": ["index", "readability", "format"],
+  "reversibility": "two-way-door",
+  "blast_radius": "component",
+  "regret_when": "The Active section grows past roughly 50 records and scrolling the index costs more than the collapsible headings save, or a tool starts parsing INDEX.md and needs a stable one-line form.",
+  "review": "2026-12-08",
+  "verify": [
+    {"id": "index-uses-record-headings", "engine": "grep", "pattern": "### ", "paths": ["docs/decisions/INDEX.md"], "expect": "match", "severity": "error"}
+  ],
+  "y_statement": "In the context of INDEX.md being the human-facing view of the ledger that no tool parses (the edit hook reads records directly, SessionStart only counts the queue, CI only checks staleness), facing one 300-character pipe-separated line per record that was unreadable in VS Code, I decided to render each record as a level-3 heading followed by one bullet per field (state, by, review, title, affects, regret, plus supersedes or retired when they apply) to achieve a file that reads and collapses like an outline, accepting about seven lines per record, which is why the section structure and ordering stay exactly as before.",
+  "question": "What layout should the generated INDEX.md use so a human can scan the review queue and the active decisions in an editor, given that the previous one-line-per-record form was unreadable?",
+  "criteria": "- Readable and collapsible in VS Code source and preview.\n- Every field the old line carried stays visible (state, review state, decided by, review date, title, affects, regret).\n- Deterministic output so scribe index --check keeps working.\n- No consumer other than humans depends on the layout.",
+  "constraints": "- Confirmed by search that no module parses INDEX.md; only humans read it.\n- The owner previewed three layouts (a table, a heading with a compact line, and a heading with a bullet per field) rendered from the real ledger (docs/build/13-index-preview-c.md) and chose the bullet form with affects and regret kept.\n- Section headers, the queue ordering note and the queue numbering stay as they were.",
+  "options": [
+    {"option": "Heading per record, one bullet per field, affects and regret kept", "for": "Collapses in VS Code; every field on its own line; regret visible where the review happens", "against": "About seven lines per record, so a large Active section is long", "evidence": "docs/build/13-index-preview-c.md; owner's choice", "chosen": true},
+    {"option": "One markdown table per section (alias, state, by, review, title)", "for": "Densest scan; aligned columns", "against": "Long titles make rows wrap; affects and regret would be dropped from the index", "evidence": "the A mock shown to the owner", "why_rejected": "Owner preferred collapsible headings"},
+    {"option": "Heading per record with fields on a compact line under it", "for": "Shorter than bullets", "against": "The compact line is still hard to scan; no per-field alignment", "evidence": "the B mock shown to the owner", "why_rejected": "Owner preferred one bullet per field"},
+    {"option": "Keep the one-line form", "for": "No change", "against": "Unreadable in an editor; the reason this came up", "evidence": "docs/decisions/INDEX.md before 2026-09-09 night", "why_rejected": "Owner: this is not really human readable"}
+  ],
+  "decision": "render_index emits, per record, a level-3 heading (numbered in the review queue, with [supersedes ratified] appended where it applies) followed by bullets in this order: supersedes or retired when applicable, state (effective, review), by, review date, title, affects (comma-separated path patterns, omitted when empty), regret (omitted when empty). Blocks are separated by one blank line; the document header, section headers and ordering are unchanged.",
+  "consequences": "- Positive: the review queue and active decisions read as an outline; headings collapse in editors.\n- Negative: the index is about seven times longer per record; a very large ledger scrolls more.\n- Requires: any future tool that wants machine-readable index data reads the records, not INDEX.md.\n- Measure: whether the owner keeps reading INDEX.md in the editor rather than opening records, and the line count of the Active section over time.",
+  "evidence_quote": "Yeah. I think I like this option, especially because in Versus Code, you can easily collapse, uh, headers. I think it's pretty viewable. So let's use, uh, this format.",
+  "evidence_pointers": [
+    "Owner (Nikita Boguslavskii) to Claude Fable 5.1, Claude Code session session_01A6tVoZuuWqu56QxEqtAjRw, 2026-09-09 night, voice-transcribed (Versus Code is VS Code).",
+    "docs/build/13-index-preview-c.md, the preview the owner approved.",
+    "docs/build/14-index-format-c.md, the implementation report."
+  ]
+}
