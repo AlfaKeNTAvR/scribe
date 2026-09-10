@@ -1,4 +1,3 @@
-import fcntl
 import json
 import time
 from collections.abc import Callable
@@ -10,6 +9,7 @@ from scribe.index import render_index
 from scribe.state import ledger_lock_path
 from scribe.store import Store
 from scribe.ulid import generate as generate_ulid
+from locking import fcntl, requires_flock
 
 
 def write_fixture_record(
@@ -439,6 +439,7 @@ def test_index_command_reports_a_missing_store(
     assert "no decision store found" in out
 
 
+@requires_flock
 def test_index_write_lock_timeout_exits_nonzero_without_writing(
     tmp_repo: Path, run_cli: Callable[..., tuple[int, str, str]]
 ) -> None:
@@ -466,6 +467,7 @@ def test_index_write_lock_timeout_exits_nonzero_without_writing(
     assert not index_file.exists()
 
 
+@requires_flock
 def test_index_check_lock_timeout_exits_nonzero(
     tmp_repo: Path, run_cli: Callable[..., tuple[int, str, str]]
 ) -> None:

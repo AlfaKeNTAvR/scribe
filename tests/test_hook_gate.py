@@ -1,4 +1,3 @@
-import fcntl
 import json
 import subprocess
 import time
@@ -12,6 +11,7 @@ from scribe.hooks.launcher import POLICY_ADVISORY, POLICY_GATE
 from scribe.record import Record
 from scribe.state import LOCK_FILE, load_state, session_entry, update_state
 from scribe.store import Store
+from locking import fcntl, requires_flock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = PROJECT_ROOT / "tests" / "fixtures" / "hooks"
@@ -485,6 +485,7 @@ def test_exit_plan_mode_allows_with_pending_decision_but_still_flags(
     assert session_state(tmp_repo)["decision_worthy"]["areas"] == ["dependency"]
 
 
+@requires_flock
 def test_exit_plan_mode_allows_with_pending_decision_despite_held_state_lock(
     run_hook: RunHook, tmp_repo: Path, set_config: SetConfig
 ) -> None:

@@ -1,6 +1,5 @@
 """T9: `scribe ratify` and `scribe reject` (plan 3.8 matrix, 4.10 order, F1/F5/F7/F8)."""
 
-import fcntl
 import json
 import os
 import re
@@ -15,6 +14,7 @@ from pathlib import Path
 import pytest
 from scribe import ratify as ratify_module
 from scribe.record import Record
+from locking import fcntl, requires_flock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SPEC_SUPERSEDES = PROJECT_ROOT / "tests" / "fixtures" / "new_spec_supersedes.json"
@@ -458,6 +458,7 @@ def test_failed_attestation_append_changes_nothing(
     assert load(tmp_repo, unreviewed).data["review_state"] == "ratified"
 
 
+@requires_flock
 def test_ratify_lock_timeout_exits_nonzero_without_ledger_writes(
     run_cli: RunCli, tmp_repo: Path, unreviewed: str
 ) -> None:

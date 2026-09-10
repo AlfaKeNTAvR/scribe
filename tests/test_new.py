@@ -1,4 +1,3 @@
-import fcntl
 import json
 import os
 import sys
@@ -13,6 +12,7 @@ from scribe.record import Record
 from scribe.schema import validate_record
 from scribe.state import ledger_lock_path, session_entry, state_path, update_state
 from scribe.store import Store
+from locking import fcntl, requires_flock
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SPEC = FIXTURES / "new_spec.json"
@@ -451,6 +451,7 @@ def test_new_registers_under_unknown_without_a_session(
     assert len(session["pending_decisions"]) == 1
 
 
+@requires_flock
 def test_new_lock_timeout_exits_nonzero_without_writing(
     run_cli: RunCli, tmp_repo: Path
 ) -> None:

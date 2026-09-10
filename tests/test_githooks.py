@@ -4,7 +4,6 @@ The hooks are installed as files that call `sys.executable -m scribe git-hook
 <name>` (no shim, no uv), and real `git commit` runs in the tmp repo.
 """
 
-import fcntl
 import io
 import json
 import os
@@ -24,6 +23,7 @@ from scribe.newrecord import create_record, load_spec
 from scribe.record import Record
 from scribe.state import ledger_lock_path, state_path
 from scribe.store import Store
+from locking import fcntl, requires_flock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SPEC = PROJECT_ROOT / "tests" / "fixtures" / "new_spec.json"
@@ -471,6 +471,7 @@ def test_post_commit_saves_proposed_lifecycle_when_link_already_exists(
     assert pending_ids(hooked_repo) == []
 
 
+@requires_flock
 def test_post_commit_lock_timeout_fails_open_without_writing(
     hooked_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -782,6 +783,7 @@ def test_post_rewrite_writes_nothing_when_no_record_is_involved(
     assert git(hooked_repo, "status", "--porcelain").stdout == before
 
 
+@requires_flock
 def test_post_rewrite_lock_timeout_fails_open_without_writing(
     hooked_repo: Path,
 ) -> None:

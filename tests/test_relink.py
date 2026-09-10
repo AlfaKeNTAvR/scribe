@@ -12,7 +12,6 @@ and leaves exactly the reachable commits linked, belongs here.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import subprocess
@@ -25,6 +24,7 @@ from scribe.newrecord import create_record, load_spec
 from scribe.record import Record
 from scribe.state import ledger_lock_path
 from scribe.store import Store
+from locking import fcntl, requires_flock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SPEC = PROJECT_ROOT / "tests" / "fixtures" / "new_spec.json"
@@ -129,6 +129,7 @@ def test_relink_keeps_two_already_linked_commits(
     assert "nothing to relink" in second.stdout
 
 
+@requires_flock
 def test_relink_lock_timeout_exits_nonzero_without_writing(
     repo_with_record: tuple[Path, Record],
 ) -> None:

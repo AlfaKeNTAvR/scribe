@@ -1,4 +1,3 @@
-import fcntl
 import json
 import sys
 import types
@@ -17,6 +16,7 @@ from scribe.state import (
     state_path,
     update_state,
 )
+from locking import fcntl, requires_flock
 
 
 def add_session(session_id: str, **fields: object):
@@ -177,6 +177,7 @@ def test_windows_adapter_bounded_retry_then_reports_timeout(
     assert "state lock timeout" in error_log_path(tmp_repo).read_text(encoding="utf-8")
 
 
+@requires_flock
 def test_posix_contention_drops_state_update(
     tmp_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -191,6 +192,7 @@ def test_posix_contention_drops_state_update(
     assert "state lock timeout" in error_log_path(tmp_repo).read_text(encoding="utf-8")
 
 
+@requires_flock
 def test_posix_lock_is_released_after_block(tmp_repo: Path) -> None:
     lock_path = tmp_repo / ".claude" / "scribe" / LOCK_FILE
     with locked(lock_path) as acquired:
