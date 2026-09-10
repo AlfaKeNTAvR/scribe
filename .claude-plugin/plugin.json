@@ -1,6 +1,6 @@
 {
   "name": "scribe",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Records agent decisions, links them to code, injects them before edits, queues them for human ratification.",
   "author": {
     "name": "Nikita Boguslavskii",

@@ -306,6 +306,41 @@ release:
   anticipate (`npm.cmd`, `-X`/`--request`, and so on), but the matcher itself
   has not been run against a live PowerShell session.
 
+## Releasing
+
+Claude Code caches an installed plugin under the version the manifests state,
+and fetches new files only when that version differs from the cached one. A
+change published without a bump therefore reaches nobody, and the user sees
+no error: their `/plugin marketplace update` succeeds and nothing changes
+(`D-260910-pin-plugin-version-per-release`).
+
+So every published change moves the version. Patch for a fix or a
+documentation change (`0.2.1`), minor for a new command, skill or hook
+(`0.3.0`). Below `1.0` a minor bump may also break something.
+
+The version lives in four places, and `test_every_manifest_states_the_same_version`
+fails the build when they disagree:
+
+```sh
+src/scribe/__init__.py        __version__
+pyproject.toml                [project] version
+.claude-plugin/plugin.json    version
+.claude-plugin/marketplace.json  the scribe entry's version
+```
+
+Checklist for a release:
+
+1. Bump the four sites, then `uv lock` so `uv.lock` records the new version.
+2. `uv run pytest -q`, `uv run scribe lint`, `uv run scribe index --check`,
+   `uv run scribe doctor`, `claude plugin validate .`.
+3. Commit and push to `main`, then confirm CI is green.
+4. Optionally tag the commit (`git tag v0.2.0`), so a marketplace entry or an
+   install can pin a ref.
+
+Users pick the release up with `/plugin marketplace update scribe` followed by
+`claude plugin update scribe`; a reinstall (`/plugin uninstall scribe` then
+`/plugin install scribe@scribe`) always works.
+
 ## Tests
 
 Run the suite from this repository:
