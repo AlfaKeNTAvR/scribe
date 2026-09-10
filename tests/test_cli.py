@@ -1,6 +1,8 @@
 from collections.abc import Callable
 from pathlib import Path
 
+import scribe
+
 
 def test_version(
     run_cli: Callable[..., tuple[int, str, str]],
@@ -10,5 +12,5 @@ def test_version(
     project_root = Path(__file__).resolve().parents[1]
 
     assert code == 0
-    assert stdout == f"scribe 0.1.0 ({project_root})\n"
+    assert stdout == f"scribe {scribe.__version__} ({project_root})\n"
     assert stderr == ""

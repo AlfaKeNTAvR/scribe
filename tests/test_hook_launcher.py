@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import scribe
 from scribe.config import gates_mode
 from scribe.hooks import launcher
 from scribe.hooks.launcher import Verdict, run_advisory, run_gate
@@ -37,10 +38,27 @@ def state_file(root: Path) -> Path:
 # --- manifest and registration ---------------------------------------------
 
 
+def test_every_manifest_states_the_same_version() -> None:
+    """A stale marketplace version strands installed copies.
+
+    Claude Code caches an installed plugin under its version, so publishing
+    new skills without moving the marketplace entry leaves users on the old
+    copy with no sign that anything changed.
+    """
+    marketplace = json.loads(
+        (PROJECT_ROOT / ".claude-plugin" / "marketplace.json").read_text()
+    )
+    entry = next(item for item in marketplace["plugins"] if item["name"] == "scribe")
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert entry["version"] == scribe.__version__
+    assert f'version = "{scribe.__version__}"' in pyproject
+
+
 def test_plugin_manifest_fields() -> None:
     manifest = json.loads((PROJECT_ROOT / ".claude-plugin" / "plugin.json").read_text())
     assert manifest["name"] == "scribe"
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == scribe.__version__
     assert manifest["author"]["name"] == "Nikita Boguslavskii"
     assert manifest["description"]
     # Published from a public marketplace, so the entry says who owns it and
