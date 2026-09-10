@@ -81,7 +81,9 @@ goes quiet rather than breaking the session. Install the Microsoft Store
 Python, which does provide `python3.exe`, or put a `python3.cmd` on PATH that
 forwards to your interpreter, then confirm with `scribe doctor`.
 
-Installing the plugin gives you the five skills and the Claude Code hooks
+Installing the plugin gives you the six skills (`/scribe:decide`,
+`/scribe:ratify`, `/scribe:reject`, `/scribe:init`, `/scribe:lint`,
+`/scribe:doctor`) and the Claude Code hooks
 (`hooks/hooks.json`). It does **not** touch any git repository. To add
 scribe's git hooks, CI check and config to a project, run `scribe init` inside
 that project's repository (see below).
