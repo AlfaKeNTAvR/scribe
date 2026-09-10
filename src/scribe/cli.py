@@ -147,6 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
         "git-hook",
         help="run a git hook entrypoint (prepare-commit-msg, commit-msg, post-commit, post-rewrite)",
     )
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="check an installation: hook interpreter, uv, git hooks, store",
+    )
+    doctor_parser.add_argument(
+        "--json", action="store_true", dest="as_json", help="machine-readable report"
+    )
     git_hook_parser.add_argument("name", help="git hook name")
     git_hook_parser.add_argument(
         "hook_args", nargs=argparse.REMAINDER, help="arguments git passed to the hook"
@@ -390,6 +397,25 @@ def _lint_command(args: argparse.Namespace) -> int:
     return code
 
 
+def _doctor_command(args: argparse.Namespace) -> int:
+    from scribe.doctor import render, run_doctor
+
+    code, checks = run_doctor()
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "ok": code == 0,
+                    "checks": [check.__dict__ for check in checks],
+                }
+            )
+        )
+        return code
+    for line in render(checks):
+        print(line)
+    return code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -415,6 +441,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _init_command(args)
     if args.command == "lint":
         return _lint_command(args)
+    if args.command == "doctor":
+        return _doctor_command(args)
     if args.command == "hook":
         from scribe.hooks.launcher import dispatch
 
