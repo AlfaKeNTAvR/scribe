@@ -214,8 +214,10 @@ def test_by_defaults_to_git_user_name_and_is_normalized(
     other = "D-260908-unreviewed-second"
     make_unreviewed(tmp_repo, other, "NR02")
 
-    run_cli(["ratify", unreviewed, "--via", "skill", "free", "text", "note"], tmp_repo)
-    run_cli(["ratify", other, "--by", "Nikita Boguslavskii"], tmp_repo)
+    # Options before the positionals, as the skills pass them: argparse in
+    # Python 3.12.3 (the GitHub runner) rejects note words placed after --via.
+    run_cli(["ratify", "--via", "skill", unreviewed, "free", "text", "note"], tmp_repo)
+    run_cli(["ratify", "--by", "Nikita Boguslavskii", other], tmp_repo)
     first, second = attestation_lines(tmp_repo)[-2:]
 
     assert load(tmp_repo, unreviewed).data["ratified_by"] == "@scribe"
