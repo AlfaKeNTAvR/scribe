@@ -169,7 +169,7 @@ def test_init_writes_a_workflow_whose_run_line_invokes_the_ci_source(
     assert text.startswith("# scribe-managed v1\n")
     workflow = yaml.safe_load(text)
     steps = workflow["jobs"]["scribe-check"]["steps"]
-    assert steps[1] == {"uses": "astral-sh/setup-uv@v10"}
+    assert steps[1] == {"uses": "astral-sh/setup-uv@v10.0.1"}
     assert steps[2]["run"].startswith(
         f"uv run --frozen --project {PROJECT_ROOT} scribe check"
     )
