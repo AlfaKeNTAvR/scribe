@@ -2,7 +2,13 @@
 
 Written by the main Fable 5.1 session for the next session (after a compaction or a usage-limit reset). Everything below is on disk and committed unless marked otherwise.
 
-## Day 2 close (2026-09-09 about 19:15, read this first)
+## Published (2026-09-09 night, read this first)
+
+- Public repository https://github.com/AlfaKeNTAvR/scribe, default branch `main` created at the tip of `nikita/feat/scribe-bootstrap` (69 commits) and pushed; only `main` is on GitHub. No tag yet (v0.1.0 waits for the owner's word). Pre-push audit: no secrets or tokens tracked, scratch state ignored, the owner's name and email are in commits and the marketplace file by choice, `/home/alfakentavr` paths remain in the build docs.
+- Landed after the day 2 close: the strict verdict-first slug for `scribe new` (`docs/build/14-strict-slug.md`, record `D-260910-require-verdict-first-alias-slug`) and INDEX format C, one heading per record (`14-index-format-c.md`, record `D-260910-write-index-heading-per-record`); both analyses in `13-*.md`. Suite 486 passed, 3 skipped. Playground `decision.json` templates carry a `slug` placeholder.
+- Still for the owner: ratify or reject the six unreviewed records, add main-branch protection requiring `scribe-check`, tag v0.1.0, delete the throwaway worktrees (`~/scribe-wt/{v3,v8,v19,v21,q2,q3,q4,f1..f5,g1..g3,h1,h2}`) and the plugin copies.
+
+## Day 2 close (2026-09-09 about 19:15)
 
 - Every item from both final reviews is landed: batch F (F1 to F5) and batch G (G1 to G3), one commit per fix, reports under `docs/build/12-review-fix-*.md`, decisions I128 to I160 and M15 to M17 in the log. About 64 commits on the branch, tree clean, nothing pushed. Suite: 478 passed, 3 skipped. lint (3 info lines, the unreviewed-but-implemented dogfood records), `index --check`, `validate`, `check --base 3a5b1d2` and `claude plugin validate .` green. Shims refreshed in this repo and the three playgrounds (shebang is now `env -S python3 -I -S`).
 - The four usage-limit-killed agents were resumed from their transcripts after the 18:10 reset and finished; three-way merges were needed in gitutil.py (F5 strict helpers versus G2 binary output), check.py (F5 precomputed path sets versus G3 range deletions) and two import lines. The G3 range-deletion helper was made strict and binary to match.
