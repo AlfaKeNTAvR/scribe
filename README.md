@@ -11,7 +11,43 @@ do, and where it can fail quietly. Full behavioural spec:
 
 ## Install
 
-Local development, from this checkout:
+From the public marketplace, which is this repository:
+
+```
+/plugin marketplace add AlfaKeNTAvR/scribe
+/plugin install scribe@scribe
+```
+
+The marketplace name and the plugin name are both `scribe`, hence the doubled
+token. `/plugin marketplace add` also takes a full git URL
+(`https://github.com/AlfaKeNTAvR/scribe.git`), either form with a `@branch`,
+`@tag` or `#ref` suffix, and a URL that serves a `marketplace.json` directly.
+Refresh a marketplace after a release with `/plugin marketplace update scribe`;
+third-party plugins do not auto-update, so re-run the install after a version
+bump.
+
+For a whole team, commit the marketplace into the project's
+`.claude/settings.json` instead, so nobody runs the add command:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "scribe": {
+      "source": { "source": "github", "repo": "AlfaKeNTAvR/scribe" }
+    }
+  }
+}
+```
+
+From a local checkout, either add the checkout as a marketplace (persistent,
+survives restarts):
+
+```
+/plugin marketplace add ~/scribe
+/plugin install scribe@scribe
+```
+
+or load it for one session only:
 
 ```
 claude --plugin-dir ~/scribe
@@ -19,6 +55,10 @@ claude --plugin-dir ~/scribe
 
 then, inside a running Claude Code session, run `/reload-plugins` to pick up
 changes without restarting.
+
+After installing, run `scribe doctor` (see the CLI reference) once: it checks
+the pieces an install can get wrong, above all the `python3` the hooks are
+launched with.
 
 Dogfooding caveat (verified 2026-09-09 on Claude Code 2.1.266 and 2.1.267,
 undocumented): Claude Code treats every file under a loaded plugin's root as
@@ -30,9 +70,16 @@ plugin loaded is unaffected. To work on scribe's own code with scribe active,
 load the plugin from a copy of the checkout (`cp -a ~/scribe /tmp/scribe-plugin`
 then `--plugin-dir /tmp/scribe-plugin`).
 
-Once scribe is published to a marketplace, install it the normal way (`/plugin
-marketplace add <source>` then `/plugin install scribe`) and re-run the
-install after any version bump: third-party plugins do not auto-update.
+Windows: the hooks in `hooks/hooks.json` launch `python3`, and Claude Code
+resolves that name on PATH with no platform branch available in the hook
+schema (checked against the hooks documentation, 2026-09-10). Windows
+installers usually provide `python.exe` and the `py` launcher but no
+`python3.exe`, and the stub that Windows ships by default opens the Microsoft
+Store instead of running anything. Claude Code reports a launch failure as a
+non-blocking `hook error` line in the transcript and carries on, so scribe
+goes quiet rather than breaking the session. Install the Microsoft Store
+Python, which does provide `python3.exe`, or put a `python3.cmd` on PATH that
+forwards to your interpreter, then confirm with `scribe doctor`.
 
 Installing the plugin gives you the five skills and the Claude Code hooks
 (`hooks/hooks.json`). It does **not** touch any git repository. To add
@@ -57,6 +104,7 @@ environment that has scribe installed).
 | `lint` | Store-wide rules over every record: stale index, immutable-field changes, unattested review states, expired proposals, `verify` entries, and more (plan section 4.12). |
 | `init [--force] [--hooks-dir DIR] [--ci-source SPEC]` | Installs the git hook shims (`prepare-commit-msg`, `commit-msg`, `post-commit`, `post-rewrite`), `.claude/scribe/config.json`, the `RATIFICATIONS.jsonl` deny rule in `.claude/settings.json`, and (with `--ci-source`) the `scribe-check.yml` workflow, into the current repository. |
 | `relink` | Rebuilds every record's `implementation_links` from git history: reachable linked commits are kept and refreshed, unreachable ones (post-amend, post-rebase) are dropped, missing ones are added. No range option; always looks at the whole history. `git commit --amend` and `git rebase` already trigger this automatically through the `post-rewrite` hook; run it by hand for a history rewritten somewhere the hook never ran, for example on another clone. |
+| `doctor [--json]` | Checks an installation and prints one line per check: the `python3` the Claude Code hooks are launched with, `uv`, the plugin root and its `hooks.json`, the git hook shims and their interpreter, `.claude/settings.json`, the decision store and the index. Exits 1 when any check fails, 0 when everything passes or only warns. |
 | `hook <event>` | Entry point for a Claude Code hook; reads the event payload as JSON on stdin. Not meant to be run by hand. |
 | `git-hook <name> [args...]` | Entry point for a git hook (`prepare-commit-msg`, `commit-msg`, `post-commit`, `post-rewrite`); this is what the shims `scribe init` writes actually call. Not meant to be run by hand. |
 | `--version` | Prints the installed scribe version and the path it was loaded from. |
@@ -134,7 +182,11 @@ those sessions. `scribe init` and the SessionStart hook both print a
 reminder to start Claude at the repository root; for a session that must
 start below it, add `Edit(**/docs/decisions/RATIFICATIONS.jsonl)` to your own
 user-level settings instead, since a user-level rule is not anchored to the
-project's settings source. None of this blocks a subprocess: an agent could
+project's settings source. A repository that is itself a `.claude` directory
+gets a nested `.claude/.claude/settings.json`, and a `.gitignore` line for
+`.claude/` then keeps that file out of the repository entirely, so the deny
+rule protects the machine it was written on and no other; `scribe doctor`
+reports this as `settings reach`. None of this blocks a subprocess: an agent could
 run `scribe ratify` through Bash. In this release, human-only ratification is
 by construction of the skills (`/scribe:ratify` and `/scribe:reject` carry
 `disable-model-invocation: true`), not by proof; the attestation line records
