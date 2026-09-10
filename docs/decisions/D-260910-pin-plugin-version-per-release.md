@@ -6,7 +6,7 @@ date: '2026-09-10'
 schema_version: 1
 task_refs: []
 review_state: unreviewed
-effective_state: proposed
+effective_state: implemented
 decided_by: human
 recommended_by: claude-code
 ratified_by: null
@@ -24,7 +24,8 @@ affects:
 - {type: path, pattern: .claude-plugin/plugin.json}
 - {type: path, pattern: pyproject.toml}
 - {type: path, pattern: src/scribe/__init__.py}
-implementation_links: []
+implementation_links:
+- {commit: 9dc7604ff9ab, paths: &id001 [.claude-plugin/marketplace.json, .claude-plugin/plugin.json, pyproject.toml, src/scribe/__init__.py]}
 tags:
 - release
 - versioning
@@ -41,6 +42,8 @@ supersedes: null
 relates_to: []
 history:
 - {at: '2026-09-10T04:09:47Z', event: proposed, by: claude-code, session: session_01A6tVoZuuWqu56QxEqtAjRw}
+- {at: '2026-09-10T04:13:46Z', event: link_added, by: scribe-post-commit, commit: 9dc7604ff9ab, field: implementation_links, old: [], new: [{commit: 9dc7604ff9ab, paths: *id001}]}
+- {at: '2026-09-10T04:13:46Z', event: implemented, by: scribe-post-commit, commit: 9dc7604ff9ab, field: effective_state, old: proposed, new: implemented}
 ---
 
 # Every published change bumps an explicit semantic version in all four manifests, patch for a fix and minor for a new skill, because Claude Code never fetches an unmoved version
