@@ -1,8 +1,15 @@
 [project]
 name = "scribe"
 version = "0.1.0"
+description = "Records agent decisions, links them to code, injects them before edits, queues them for human ratification."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Nikita Boguslavskii", email = "bognik3@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/AlfaKeNTAvR/scribe"
 
 [dependency-groups]
 dev = ["pytest>=8"]

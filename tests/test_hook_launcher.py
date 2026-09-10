@@ -41,8 +41,12 @@ def test_plugin_manifest_fields() -> None:
     manifest = json.loads((PROJECT_ROOT / ".claude-plugin" / "plugin.json").read_text())
     assert manifest["name"] == "scribe"
     assert manifest["version"] == "0.1.0"
-    assert manifest["author"] == {"name": "Nikita Boguslavskii"}
+    assert manifest["author"]["name"] == "Nikita Boguslavskii"
     assert manifest["description"]
+    # Published from a public marketplace, so the entry says who owns it and
+    # under what terms (D-260910-use-apache-license-not-mit).
+    assert manifest["license"] == "Apache-2.0"
+    assert manifest["homepage"].startswith("https://")
 
 
 def test_hooks_json_every_handler_is_exec_form() -> None:
